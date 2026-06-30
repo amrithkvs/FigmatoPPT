@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: figma-deck
+    env: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /api/config
+    envVars:
+      - key: DECKS_OUTPUT_DIR
+        value: /data/decks
+      - key: FIGMA_DECK_DB_PATH
+        value: /data/decks/data.db
+      - key: WEBHOOK_BASE_URL
+        sync: false
+      - key: MS_CLIENT_ID
+        sync: false
+      - key: MS_TENANT
+        sync: false
+      - key: MS_REDIRECT_URI
+        sync: false
+      - key: MS_LOGIN_HINT
+        sync: false
+    disk:
+      name: figma-deck-data
+      mountPath: /data
+      sizeGB: 5

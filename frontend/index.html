@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/svg+xml" href="/assets/microsoft-logo.svg" />
+<title>Figma → PPT Deck</title>
+<style>
+  :root {
+    --bg: #fafafa; --card: #fff; --ink: #1a1a1a; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #111827; --ok: #16a34a; --err: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 56px 20px 80px; }
+  h1 { font-size: 24px; font-weight: 650; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 32px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 22px; margin-bottom: 18px;
+  }
+  label { display: block; font-weight: 550; font-size: 13px; margin: 0 0 6px; }
+  .label-with-icon { display: flex; align-items: center; gap: 6px; }
+  .label-with-icon img { width: 14px; height: 14px; object-fit: contain; }
+  .hint { color: var(--muted); font-weight: 400; font-size: 12px; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 11px 12px; border: 1px solid var(--line);
+    border-radius: 9px; font-size: 14px; margin-bottom: 16px; background: #fff;
+  }
+  input:focus { outline: 2px solid #c7d2fe; border-color: #a5b4fc; }
+  .sched { color: var(--muted); font-size: 13px; margin: -4px 0 18px; }
+  button {
+    border: 0; border-radius: 9px; padding: 11px 16px; font-size: 14px;
+    font-weight: 600; cursor: pointer; background: var(--accent); color: #fff;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  button.danger { background: #fff; color: var(--err); border: 1px solid var(--line); padding: 7px 11px; font-size: 13px; }
+  .deck { display: flex; align-items: center; gap: 14px; }
+  .deck + .deck { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
+  .deck .meta { flex: 1; min-width: 0; }
+  .deck .name { font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .ppt-logo { width: 15px; height: 15px; flex: 0 0 auto; display: inline-block; }
+  .sync { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+  .sync.on { color: #15803d; background: #dcfce7; }
+  .sync.off { color: #92400e; background: #fef3c7; }
+  .tokrow { display: flex; gap: 10px; align-items: center; }
+  .tokrow.saved { justify-content: space-between; }
+  .tokrow input { margin-bottom: 0; flex: 1; }
+  .key { margin-right: 3px; }
+  .tokhelp { font-size: 12.5px; color: var(--muted); margin: 2px 0 8px; line-height: 1.5; }
+  .scopes { list-style: none; margin: 0 0 16px; padding: 10px 12px; background: #f8fafc; border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; }
+  .scopes li { padding: 3px 0; color: var(--ink); }
+  .scopes li + li { border-top: 1px solid #eef2f7; }
+  .req { display: inline-block; font-size: 11px; font-weight: 600; color: #15803d; background: #dcfce7; padding: 0 6px; border-radius: 8px; margin-left: 4px; }
+  .opt { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+  .loc { font-size: 12.5px; color: var(--muted); margin: -6px 2px 14px; line-height: 1.5; }
+  .loc code { background: #f1f5f9; padding: 1px 5px; border-radius: 5px; font-size: 12px; color: var(--ink); }
+  .deck .status { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.idle { background: #9ca3af; }
+  .row { display: flex; gap: 8px; }
+  .menu { position: relative; }
+  .menu-pop {
+    position: absolute; right: 0; top: calc(100% + 6px); min-width: 176px;
+    background: #fff; border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 10px 25px rgba(0,0,0,.08); padding: 6px; z-index: 20;
+  }
+  .menu-pop[hidden] { display: none; }
+  .menu-pop button {
+    width: 100%; text-align: left; background: #fff; color: var(--ink);
+    border: 0; border-radius: 7px; padding: 8px 10px; font-size: 13.5px;
+    font-weight: 500;
+  }
+  .menu-pop button:hover { background: #f3f4f6; }
+  .menu-pop button:disabled { color: var(--muted); background: #fff; }
+  .msg { font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  #msg:empty { display: none; }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 8px 0; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 8px 0 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Figma → PPT Deck</h1>
+  <p class="sub">Connect a Figma file once, and we'll generate an editable PowerPoint with real text and shapes, not static images. It automatically refreshes daily at 3 AM, and you can manually refresh anytime to pull in the latest design updates.</p>
+
+  <div class="card" id="tokencard"><!-- filled by JS: token form, or saved state --></div>
+  <div class="card" id="mscard"><!-- filled by JS: microsoft cloud sync status --></div>
+
+  <div class="card">
+    <label class="label-with-icon"><img src="/assets/figma-logo.webp" alt="" aria-hidden="true" />Figma file URL</label>
+    <input id="url" type="text" placeholder="https://www.figma.com/design/…" />
+
+    <button id="create">Create PPT deck</button>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <h2>Your decks</h2>
+  <p class="loc">The live file lives in <code id="locdir">~/Documents/Figma Decks</code>. <b>Open</b> launches that one file — it auto-updates on every refresh (fully quit &amp; reopen PowerPoint, ⌘Q, to see changes).</p>
+  <div class="card" id="decks"><div class="empty">No decks yet.</div></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const SHOW_SYNC_BADGE = false;
+const SHOW_MS_SYNC_CARD = false;
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || data.error || "Request failed");
+  return data;
+}
+
+function fmt(iso) {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function isBuilding(d) { return !d.last_run || d.last_status === "building"; }
+
+function deckRow(d) {
+  const ok = d.last_status === "ok";
+  const building = isBuilding(d);
+  const progress = Math.max(0, Math.min(100, Number(d.build_progress ?? 0)));
+  const cls = building ? "idle" : ok ? "ok" : "err";
+  const status = building
+    ? `Building ${progress}%…`
+    : ok
+      ? `${d.slide_count} slides · updated ${fmt(d.last_run)}`
+      : `${d.last_status} · ${fmt(d.last_run)}`;
+  const sync = d.live_sync
+    ? `<span class="sync on">● Live sync</span>`
+    : `<span class="sync off">○ Daily refresh</span>`;
+  return `
+    <div class="deck" data-id="${d.id}">
+      <div class="meta">
+        <div class="name"><img class="ppt-logo" src="/assets/powerpoint.svg" alt="" aria-hidden="true" />${d.name}${SHOW_SYNC_BADGE ? ` ${sync}` : ""}</div>
+        <div class="status"><span class="dot ${cls}"></span>${status}</div>
+      </div>
+      <div class="row">
+        <button class="ghost" onclick="regen(${d.id})" ${building ? "disabled" : ""}>Refresh</button>
+          <div class="menu">
+            <button onclick="toggleDeckMenu(${d.id})" ${ok ? "" : "disabled"} title="Open actions">Open ▾</button>
+            <div class="menu-pop" id="menu-${d.id}" hidden>
+              <button onclick="openDeck(${d.id}); closeDeckMenus();">Open</button>
+              <button onclick="openDeckWeb(${d.id}); closeDeckMenus();" ${d.web_url ? "" : "disabled"}>Open in PowerPoint (web)</button>
+              <button onclick="revealDeck(${d.id}); closeDeckMenus();">Reveal in Finder</button>
+            </div>
+          </div>
+        <button class="danger" onclick="del(${d.id})">✕</button>
+      </div>
+    </div>`;
+}
+
+function closeDeckMenus() {
+  document.querySelectorAll('.menu-pop').forEach((el) => { el.hidden = true; });
+}
+
+function toggleDeckMenu(id) {
+  const el = document.getElementById(`menu-${id}`);
+  if (!el) return;
+  const willOpen = el.hidden;
+  closeDeckMenus();
+  el.hidden = !willOpen;
+}
+
+function render(decks) {
+  $("decks").innerHTML = decks.length
+    ? decks.map(deckRow).join("")
+    : `<div class="empty">No decks yet.</div>`;
+  if (decks.some(isBuilding)) startPolling();
+}
+
+async function load() {
+  const decks = await api("/api/decks");
+  render(decks);
+  return decks;
+}
+
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    const decks = await load();
+    if (!decks.some(isBuilding)) { clearInterval(pollTimer); pollTimer = null; }
+  }, 2500);
+}
+
+$("create").onclick = async () => {
+  const figma_url = $("url").value.trim();
+  const msg = $("msg");
+  if (!tokenSaved) { msg.className = "msg err"; msg.textContent = "Save your Figma token first (above)."; return; }
+  if (!figma_url) { msg.className = "msg err"; msg.textContent = "Paste a Figma file URL."; return; }
+
+  $("create").disabled = true;
+  $("create").textContent = "Fetching...";
+  msg.className = "msg"; msg.textContent = "";
+  try {
+    await api("/api/decks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ figma_url }),  // token comes from the saved one
+    });
+    msg.className = "msg ok";
+    msg.textContent = "";
+    $("url").value = "";
+    await load();  // shows the deck as "Building…" and starts polling
+  } catch (e) {
+    msg.className = "msg err"; msg.textContent = e.message;
+  } finally {
+    $("create").disabled = false;
+    $("create").textContent = "Create PPT deck";
+  }
+};
+
+// ----- saved Figma token -----
+let tokenSaved = false;
+async function loadToken() {
+  let s;
+  try { s = await api("/api/figma-token"); } catch { return; }
+  tokenSaved = s.saved;
+  if (s.saved) {
+    $("tokencard").innerHTML = `<div class="tokrow saved">
+      <div><span class="key">🔑</span> Figma token saved <span class="hint">${s.hint || ""}</span></div>
+      <button class="ghost" onclick="editToken()">Change</button></div>`;
+  } else {
+    $("tokencard").innerHTML = tokenForm("Add your Figma token (one time)");
+  }
+}
+function tokenForm(title) {
+  return `<label>${title}</label>
+    <p class="tokhelp">In Figma: <b>Settings → Security → Personal access tokens → Generate new token</b>. Set these scopes:</p>
+    <ul class="scopes">
+      <li><b>File content</b> → <b>Read&#8209;only</b> <span class="req">required</span></li>
+      <li><b>Webhooks</b> → <b>Read and write</b> <span class="opt">for instant auto-refresh when Figma changes</span></li>
+      <li>Everything else → <b>No access</b></li>
+    </ul>
+    <div class="tokrow"><input id="tokin" type="password" placeholder="figd_…" />
+    <button id="savetok" onclick="saveToken()">Save token</button></div>
+    <div id="tokmsg" class="msg"></div>`;
+}
+function editToken() { $("tokencard").innerHTML = tokenForm("Change Figma token"); $("tokin").focus(); }
+async function saveToken() {
+  const t = ($("tokin").value || "").trim();
+  const tm = $("tokmsg");
+  if (!t) { tm.className = "msg err"; tm.textContent = "Paste your token."; return; }
+  $("savetok").disabled = true; $("savetok").textContent = "Checking…";
+  try {
+    await api("/api/figma-token", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: t }),
+    });
+    await loadToken();
+  } catch (e) {
+    tm.className = "msg err"; tm.textContent = e.message;
+    $("savetok").disabled = false; $("savetok").textContent = "Save token";
+  }
+}
+
+async function regen(id) {
+  await api(`/api/decks/${id}/generate`, { method: "POST" });
+  await load();  // flips to "Building…" and polling takes over
+}
+async function openDeck(id) { await api(`/api/decks/${id}/open`, { method: "POST" }); }
+async function openDeckWeb(id) {
+  const decks = await api("/api/decks");
+  const d = decks.find((x) => x.id === id);
+  if (!d || !d.web_url) return;
+  window.open(d.web_url, "_blank", "noopener,noreferrer");
+}
+async function revealDeck(id) { await api(`/api/decks/${id}/reveal`, { method: "POST" }); }
+async function del(id) {
+  if (!confirm("Delete this deck and its schedule?")) return;
+  await api(`/api/decks/${id}`, { method: "DELETE" });
+  await load();
+}
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest('.menu')) closeDeckMenus();
+});
+
+async function loadConfig() {
+  try {
+    const c = await api("/api/config");
+    if (c.output_dir) $("locdir").textContent = c.output_dir.replace(/^\/Users\/[^/]+/, "~");
+  } catch {}
+}
+
+function renderMsStatus(s) {
+  if (!s.configured) {
+    $("mscard").innerHTML = `<label>PowerPoint Web Sync</label><p class="tokhelp">Microsoft cloud sync is not configured on this server.</p>`;
+    return;
+  }
+  if (s.connected) {
+    $("mscard").innerHTML = `<div class="tokrow saved">
+      <div>PowerPoint Web Sync connected <span class="hint">${s.account || "Microsoft account"}</span></div>
+      <button class="ghost" onclick="disconnectMs()">Disconnect</button>
+    </div>`;
+    return;
+  }
+  $("mscard").innerHTML = `<div class="tokrow saved">
+    <div>PowerPoint Web Sync not connected</div>
+    <button onclick="connectMs()">Connect Microsoft account</button>
+  </div>`;
+}
+
+async function loadMsStatus() {
+  if (!SHOW_MS_SYNC_CARD) {
+    const card = $("mscard");
+    if (card) card.style.display = "none";
+    return;
+  }
+  try {
+    const s = await api("/api/ms/status");
+    renderMsStatus(s);
+  } catch {
+    $("mscard").innerHTML = "";
+  }
+}
+
+function connectMs() {
+  window.location.href = "/api/ms/connect";
+}
+
+async function disconnectMs() {
+  await api("/api/ms/disconnect", { method: "POST" });
+  await loadMsStatus();
+}
+
+load();
+loadConfig();
+loadToken();
+loadMsStatus();
+</script>
+</body>
+</html>

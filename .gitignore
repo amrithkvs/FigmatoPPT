@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+data.db
+decks/*.pptx
+.env
+.DS_Store
+build/
+dist/
