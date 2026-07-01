@@ -4,106 +4,331 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="icon" type="image/svg+xml" href="/assets/microsoft-logo.svg" />
-<title>Figma → PPT Deck</title>
+<title>FigPoint</title>
 <style>
   :root {
-    --bg: #fafafa; --card: #fff; --ink: #1a1a1a; --muted: #6b7280;
-    --line: #e5e7eb; --accent: #111827; --ok: #16a34a; --err: #dc2626;
+    --bg: #0a0c10;
+    --card: #11151c;
+    --ink: #f5f7fb;
+    --muted: #a3adbd;
+    --line: #283244;
+    --accent: #f3f4f6;
+    --accent-strong: #ffffff;
+    --ok: #36d399;
+    --err: #f87171;
+    --focus: #60a5fa;
+    --shadow-lg: 0 24px 44px rgba(0, 0, 0, 0.5);
+    --shadow-sm: 0 8px 18px rgba(0, 0, 0, 0.35);
   }
+
   * { box-sizing: border-box; }
+
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    min-height: 100vh;
+    color: var(--ink);
+    background:
+      linear-gradient(135deg, rgba(8, 10, 14, 0.0) 10%, rgba(8, 10, 14, 0.38) 56%, rgba(8, 10, 14, 0.88) 100%),
+      radial-gradient(circle, rgba(255, 255, 255, 0.095) 0.9px, transparent 1px),
+      radial-gradient(circle, rgba(255, 255, 255, 0.05) 0.8px, transparent 1px),
+      radial-gradient(900px 420px at -8% -10%, rgba(96, 165, 250, 0.12), transparent 62%),
+      radial-gradient(760px 360px at 108% 0%, rgba(167, 139, 250, 0.1), transparent 58%),
+      linear-gradient(180deg, #0c1118 0%, var(--bg) 62%, #080a0d 100%);
+    background-size: auto, 22px 22px, 30px 30px, auto, auto, auto;
+    background-position: 0 0, 0 0, 10px 10px, 0 0, 0 0, 0 0;
+    font: 15px/1.6 "Inter", "SF Pro Text", "Segoe UI", sans-serif;
   }
-  .wrap { max-width: 680px; margin: 0 auto; padding: 56px 20px 80px; }
-  h1 { font-size: 24px; font-weight: 650; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 32px; }
+
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 56px 20px 84px;
+  }
+
+  h1 {
+    font-size: clamp(34px, 5.2vw, 50px);
+    line-height: 1.03;
+    font-weight: 400;
+    margin: 0 0 10px;
+    letter-spacing: -0.024em;
+    color: #f8fafc;
+  }
+
+  .title-light { font-weight: 400; }
+  .title-strong {
+    font-weight: 650;
+    color: #ffffff;
+  }
+
+  .sub {
+    color: var(--muted);
+    margin: 0 0 28px;
+    max-width: none;
+    font-size: 15.5px;
+    line-height: 1.65;
+  }
+
   .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-    padding: 22px; margin-bottom: 18px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px;
+    margin-bottom: 14px;
+    box-shadow: var(--shadow-sm);
+    transition: transform .16s ease, box-shadow .16s ease;
   }
-  label { display: block; font-weight: 550; font-size: 13px; margin: 0 0 6px; }
+
+  .card:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); border-color: #475569; }
+
+  label {
+    display: block;
+    font-weight: 650;
+    font-size: 11.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: #cdd6e4;
+    margin: 0 0 8px;
+  }
+
   .label-with-icon { display: flex; align-items: center; gap: 6px; }
-  .label-with-icon img { width: 14px; height: 14px; object-fit: contain; }
-  .hint { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .label-with-icon img { width: 16px; height: 16px; object-fit: contain; }
+  .hint { color: var(--muted); font-weight: 500; font-size: 12px; }
+
   input[type=text], input[type=password] {
-    width: 100%; padding: 11px 12px; border: 1px solid var(--line);
-    border-radius: 9px; font-size: 14px; margin-bottom: 16px; background: #fff;
+    width: 100%;
+    padding: 13px 14px;
+    border: 1px solid #3a475d;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    background: #0e131b;
+    color: var(--ink);
+    transition: border-color .18s ease, box-shadow .18s ease;
   }
-  input:focus { outline: 2px solid #c7d2fe; border-color: #a5b4fc; }
+
+  input:focus {
+    outline: none;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.24);
+  }
+
   .sched { color: var(--muted); font-size: 13px; margin: -4px 0 18px; }
+
   button {
-    border: 0; border-radius: 9px; padding: 11px 16px; font-size: 14px;
-    font-weight: 600; cursor: pointer; background: var(--accent); color: #fff;
+    border: 0;
+    border-radius: 10px;
+    padding: 11px 14px;
+    font-size: 14px;
+    font-weight: 650;
+    cursor: pointer;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+    color: #101319;
+    border: 1px solid #f8fafc;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
+    transition: transform .14s ease, filter .14s ease, box-shadow .14s ease;
   }
+
+  button:hover { transform: translateY(-1px); filter: brightness(1.05); }
+  button:active { transform: translateY(0); filter: brightness(.98); }
   button:disabled { opacity: .55; cursor: default; }
-  button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
-  button.danger { background: #fff; color: var(--err); border: 1px solid var(--line); padding: 7px 11px; font-size: 13px; }
-  .deck { display: flex; align-items: center; gap: 14px; }
-  .deck + .deck { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
+  button:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  button.ghost {
+    background: #121823;
+    color: #e5e7eb;
+    border: 1px solid #3a475d;
+    box-shadow: none;
+  }
+
+  button.danger {
+    background: #1b1214;
+    color: var(--err);
+    border: 1px solid rgba(248, 113, 113, 0.5);
+    padding: 8px 11px;
+    font-size: 13px;
+    box-shadow: none;
+  }
+
+  .deck {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px;
+    border-radius: 10px;
+    position: relative;
+    z-index: 1;
+    transition: background .16s ease, transform .16s ease;
+  }
+
+  .deck:hover {
+    background: #151d29;
+    z-index: 5;
+    transform: translateX(1px);
+  }
+
+  .deck:focus-within,
+  .deck:has(.menu-pop:not([hidden])) {
+    z-index: 60;
+  }
+
+  .deck + .deck {
+    border-top: 1px solid #2b3548;
+    margin-top: 10px;
+    padding-top: 18px;
+  }
+
   .deck .meta { flex: 1; min-width: 0; }
-  .deck .name { font-weight: 600; display: flex; align-items: center; gap: 7px; }
+
+  .deck .name {
+    font-weight: 650;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink);
+  }
+
   .ppt-logo { width: 15px; height: 15px; flex: 0 0 auto; display: inline-block; }
   .sync { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
   .sync.on { color: #15803d; background: #dcfce7; }
   .sync.off { color: #92400e; background: #fef3c7; }
+
   .tokrow { display: flex; gap: 10px; align-items: center; }
   .tokrow.saved { justify-content: space-between; }
   .tokrow input { margin-bottom: 0; flex: 1; }
   .key { margin-right: 3px; }
-  .tokhelp { font-size: 12.5px; color: var(--muted); margin: 2px 0 8px; line-height: 1.5; }
-  .scopes { list-style: none; margin: 0 0 16px; padding: 10px 12px; background: #f8fafc; border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; }
+
+  .tokhelp { font-size: 13px; color: var(--muted); margin: 2px 0 8px; line-height: 1.5; }
+
+  .scopes {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 10px 12px;
+    background: #0f141d;
+    border: 1px solid #344258;
+    border-radius: 10px;
+    font-size: 12.5px;
+  }
+
   .scopes li { padding: 3px 0; color: var(--ink); }
-  .scopes li + li { border-top: 1px solid #eef2f7; }
-  .req { display: inline-block; font-size: 11px; font-weight: 600; color: #15803d; background: #dcfce7; padding: 0 6px; border-radius: 8px; margin-left: 4px; }
-  .opt { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
-  .loc { font-size: 12.5px; color: var(--muted); margin: -6px 2px 14px; line-height: 1.5; }
-  .loc code { background: #f1f5f9; padding: 1px 5px; border-radius: 5px; font-size: 12px; color: var(--ink); }
-  .deck .status { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .scopes li + li { border-top: 1px solid #2e3a4f; }
+
+  .req {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    color: #022c22;
+    background: #86efac;
+    padding: 0 6px;
+    border-radius: 8px;
+    margin-left: 4px;
+  }
+
+  .opt { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  .loc { font-size: 13px; color: var(--muted); margin: 0 2px 14px; line-height: 1.55; }
+  .loc code { background: #101721; padding: 2px 6px; border-radius: 6px; font-size: 12px; color: #dbe6f7; border: 1px solid #3a475d; }
+  .deck .status { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
   .dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.idle { background: #9ca3af; }
-  .row { display: flex; gap: 8px; }
-  .menu { position: relative; }
+
+  .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .menu { position: relative; z-index: 70; }
+
   .menu-pop {
-    position: absolute; right: 0; top: calc(100% + 6px); min-width: 176px;
-    background: #fff; border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: 0 10px 25px rgba(0,0,0,.08); padding: 6px; z-index: 20;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    min-width: 176px;
+    background: #11161f;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    padding: 6px;
+    z-index: 999;
   }
+
   .menu-pop[hidden] { display: none; }
+
   .menu-pop button {
-    width: 100%; text-align: left; background: #fff; color: var(--ink);
-    border: 0; border-radius: 7px; padding: 8px 10px; font-size: 13.5px;
+    width: 100%;
+    text-align: left;
+    background: #11161f;
+    color: var(--ink);
+    border: 0;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13.5px;
     font-weight: 500;
+    box-shadow: none;
   }
-  .menu-pop button:hover { background: #f3f4f6; }
-  .menu-pop button:disabled { color: var(--muted); background: #fff; }
-  .msg { font-size: 13px; margin-top: 10px; min-height: 18px; }
+
+  .menu-pop button:hover { background: #1b2432; }
+  .menu-pop button:disabled { color: var(--muted); background: #11161f; }
+
+  .msg { font-size: 13px; margin-top: 10px; min-height: 18px; font-weight: 600; }
   .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
   #msg:empty { display: none; }
-  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 8px 0; }
-  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 8px 0 14px; }
+
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 20px 0; }
+
+  h2 {
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: #cdd6e4;
+    margin: 14px 0 14px;
+    font-weight: 700;
+  }
+
+  a:focus-visible,
+  input:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 720px) {
+    .wrap { padding: 40px 14px 66px; }
+    .card { padding: 16px; border-radius: 12px; }
+    .deck { align-items: flex-start; flex-direction: column; }
+    .row { width: 100%; justify-content: flex-start; }
+    .tokrow { flex-wrap: wrap; }
+    .tokrow input { min-width: 100%; }
+    button { width: auto; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .deck, button, input[type=text], input[type=password] {
+      transition: none;
+    }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Figma → PPT Deck</h1>
-  <p class="sub">Connect a Figma file once, and we'll generate an editable PowerPoint with real text and shapes, not static images. It automatically refreshes daily at 3 AM, and you can manually refresh anytime to pull in the latest design updates.</p>
+<main class="wrap" aria-label="FigPoint app">
+  <h1><span class="title-light">Welcome to </span><span class="title-strong">FigPoint</span></h1>
+  <p class="sub">Connect a Figma file once, and we'll generate an editable PowerPoint with real text and shapes, not static images. You can manually refresh anytime to pull in the latest design updates.</p>
 
   <div class="card" id="tokencard"><!-- filled by JS: token form, or saved state --></div>
   <div class="card" id="mscard"><!-- filled by JS: microsoft cloud sync status --></div>
 
   <div class="card">
     <label class="label-with-icon"><img src="/assets/figma-logo.webp" alt="" aria-hidden="true" />Figma file URL</label>
-    <input id="url" type="text" placeholder="https://www.figma.com/design/…" />
+    <input id="url" type="text" placeholder="https://www.figma.com/design/…" autocomplete="url" />
 
-    <button id="create">Create PPT deck</button>
-    <div id="msg" class="msg"></div>
+    <button id="create" type="button">Create PPT deck</button>
+    <div id="msg" class="msg" aria-live="polite" role="status"></div>
   </div>
 
   <h2>Your decks</h2>
   <p class="loc">The live file lives in <code id="locdir">~/Documents/Figma Decks</code>. <b>Open</b> launches that one file — it auto-updates on every refresh (fully quit &amp; reopen PowerPoint, ⌘Q, to see changes).</p>
   <div class="card" id="decks"><div class="empty">No decks yet.</div></div>
-</div>
+</main>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -150,11 +375,10 @@ function deckRow(d) {
             <button onclick="toggleDeckMenu(${d.id})" ${ok ? "" : "disabled"} title="Open actions">Open ▾</button>
             <div class="menu-pop" id="menu-${d.id}" hidden>
               <button onclick="openDeck(${d.id}); closeDeckMenus();">Open</button>
-              <button onclick="openDeckWeb(${d.id}); closeDeckMenus();" ${d.web_url ? "" : "disabled"}>Open in PowerPoint (web)</button>
               <button onclick="revealDeck(${d.id}); closeDeckMenus();">Reveal in Finder</button>
             </div>
           </div>
-        <button class="danger" onclick="del(${d.id})">✕</button>
+        <button class="danger" type="button" aria-label="Delete deck" title="Delete deck" onclick="del(${d.id})">✕</button>
       </div>
     </div>`;
 }
@@ -234,19 +458,23 @@ async function loadToken() {
     $("tokencard").innerHTML = tokenForm("Add your Figma token (one time)");
   }
 }
-function tokenForm(title) {
+function tokenForm(title, allowCancel = false) {
+  const actions = allowCancel
+    ? `<div class="tokrow"><input id="tokin" type="password" placeholder="figd_…" autocomplete="off" />
+    <button id="savetok" type="button" onclick="saveToken()">Save token</button>
+    <button class="ghost" type="button" onclick="loadToken()">Cancel</button></div>`
+    : `<div class="tokrow"><input id="tokin" type="password" placeholder="figd_…" autocomplete="off" />
+    <button id="savetok" type="button" onclick="saveToken()">Save token</button></div>`;
   return `<label>${title}</label>
     <p class="tokhelp">In Figma: <b>Settings → Security → Personal access tokens → Generate new token</b>. Set these scopes:</p>
     <ul class="scopes">
       <li><b>File content</b> → <b>Read&#8209;only</b> <span class="req">required</span></li>
-      <li><b>Webhooks</b> → <b>Read and write</b> <span class="opt">for instant auto-refresh when Figma changes</span></li>
       <li>Everything else → <b>No access</b></li>
     </ul>
-    <div class="tokrow"><input id="tokin" type="password" placeholder="figd_…" />
-    <button id="savetok" onclick="saveToken()">Save token</button></div>
-    <div id="tokmsg" class="msg"></div>`;
+    ${actions}
+    <div id="tokmsg" class="msg" aria-live="polite" role="status"></div>`;
 }
-function editToken() { $("tokencard").innerHTML = tokenForm("Change Figma token"); $("tokin").focus(); }
+function editToken() { $("tokencard").innerHTML = tokenForm("Change Figma token", true); $("tokin").focus(); }
 async function saveToken() {
   const t = ($("tokin").value || "").trim();
   const tm = $("tokmsg");
@@ -269,12 +497,6 @@ async function regen(id) {
   await load();  // flips to "Building…" and polling takes over
 }
 async function openDeck(id) { await api(`/api/decks/${id}/open`, { method: "POST" }); }
-async function openDeckWeb(id) {
-  const decks = await api("/api/decks");
-  const d = decks.find((x) => x.id === id);
-  if (!d || !d.web_url) return;
-  window.open(d.web_url, "_blank", "noopener,noreferrer");
-}
 async function revealDeck(id) { await api(`/api/decks/${id}/reveal`, { method: "POST" }); }
 async function del(id) {
   if (!confirm("Delete this deck and its schedule?")) return;

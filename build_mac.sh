@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build "Figma Deck.app" — a standalone macOS app (no Python install needed).
+# Build "FigPoint.app" — a standalone macOS app (no Python install needed).
 set -e
 cd "$(dirname "$0")"
 
@@ -8,12 +8,15 @@ cd "$(dirname "$0")"
 
 cd backend
 ../.venv/bin/pyinstaller --noconfirm --windowed --clean \
-  --name "Figma Deck" \
+  --name "FigPoint" \
   --distpath ../dist \
   --workpath ../build \
   --specpath ../build \
   --osx-bundle-identifier com.figmadeck.app \
   --add-data "../frontend/index.html:frontend" \
+  --add-data "../PowerPoint.svg:." \
+  --add-data "../Figma-logo.svg.webp:." \
+  --add-data "../Microsoft-logo.svg:." \
   --collect-submodules uvicorn \
   --collect-submodules apscheduler \
   --collect-submodules webview \
@@ -22,6 +25,6 @@ cd backend
   desktop.py
 
 echo ""
-echo "✅ Built: dist/Figma Deck.app"
-echo "   Open it with: open 'dist/Figma Deck.app'"
+echo "✅ Built: dist/FigPoint.app"
+echo "   Open it with: open 'dist/FigPoint.app'"
 echo "   (First launch on another Mac: right-click → Open to clear Gatekeeper.)"
