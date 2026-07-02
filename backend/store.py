@@ -39,8 +39,12 @@ DB_PATH = _db_path()
 
 
 def _conn():
-    c = sqlite3.connect(DB_PATH, timeout=60)
+    c = sqlite3.connect(DB_PATH, timeout=60, check_same_thread=False)
     c.row_factory = sqlite3.Row
+    # Use WAL mode for better behavior on shared filesystems (Azure Files)
+    c.execute("PRAGMA journal_mode=WAL")
+    # Set a long busy timeout to handle locks gracefully
+    c.execute("PRAGMA busy_timeout=300000")  # 300 seconds
     return c
 
 
