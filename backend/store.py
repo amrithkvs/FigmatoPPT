@@ -19,7 +19,7 @@ def _db_path():
     # In a packaged .app, write the DB to a persistent user location (not the
     # read-only bundle). In dev, keep it at the project root.
     if getattr(sys, "frozen", False):
-        base = os.path.expanduser("~/Library/Application Support/Figma Deck")
+        base = os.path.expanduser("~/Library/Application Support/FigPoint")
         os.makedirs(base, exist_ok=True)
         return os.path.join(base, "data.db")
 
@@ -69,9 +69,15 @@ def init():
             ("web_url", "TEXT"),
             ("onedrive_item_id", "TEXT"),
             ("build_progress", "INTEGER"),
+            ("file_version", "TEXT"),
+            ("frame_hashes", "TEXT"),
+            ("user_key", "TEXT DEFAULT 'default'"),
         ):
             if col not in existing:
                 c.execute(f"ALTER TABLE decks ADD COLUMN {col} {decl}")
+
+        # Helpful index for user-scoped deck queries.
+        c.execute("CREATE INDEX IF NOT EXISTS idx_decks_user_key ON decks(user_key)")
 
         # Single connected Microsoft account (OneDrive/SharePoint sync).
         c.execute(
@@ -86,43 +92,62 @@ def init():
         # App-wide settings (e.g. the one saved Figma token).
         c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
 
-        # Migration: seed the global Figma token from an existing deck, so users
-        # who already created decks don't have to re-enter it.
-        has_token = c.execute("SELECT value FROM settings WHERE key='figma_token'").fetchone()
+        # Migration: seed default user token from existing settings/decks.
+        has_token = c.execute("SELECT value FROM settings WHERE key='figma_token:default'").fetchone()
         if not has_token:
-            d = c.execute("SELECT token FROM decks WHERE token IS NOT NULL LIMIT 1").fetchone()
-            if d and d["token"]:
-                c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('figma_token', ?)", (d["token"],))
+            legacy = c.execute("SELECT value FROM settings WHERE key='figma_token'").fetchone()
+            if legacy and legacy["value"]:
+                c.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('figma_token:default', ?)",
+                    (legacy["value"],),
+                )
+            else:
+                d = c.execute("SELECT token FROM decks WHERE token IS NOT NULL LIMIT 1").fetchone()
+                if d and d["token"]:
+                    c.execute(
+                        "INSERT OR REPLACE INTO settings (key, value) VALUES ('figma_token:default', ?)",
+                        (d["token"],),
+                    )
 
 
-def add_deck(name, figma_url, file_key, token, times):
+def _token_setting_key(user_key: str) -> str:
+    return f"figma_token:{user_key}"
+
+
+def add_deck(name, figma_url, file_key, token, times, user_key):
     with _conn() as c:
         cur = c.execute(
-            "INSERT INTO decks (name, figma_url, file_key, token, times, created_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (name, figma_url, file_key, token, json.dumps(times), datetime.now().isoformat()),
+            "INSERT INTO decks (name, figma_url, file_key, token, times, created_at, user_key) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (name, figma_url, file_key, token, json.dumps(times), datetime.now().isoformat(), user_key),
         )
         return cur.lastrowid
 
 
-def list_decks():
+def list_decks(user_key):
     with _conn() as c:
-        rows = c.execute("SELECT * FROM decks ORDER BY id DESC").fetchall()
+        rows = c.execute("SELECT * FROM decks WHERE user_key=? ORDER BY id DESC", (user_key,)).fetchall()
     return [_public(dict(r)) for r in rows]
 
 
-def get_deck(deck_id, with_secrets=False):
+def get_deck(deck_id, with_secrets=False, user_key=None):
     with _conn() as c:
-        row = c.execute("SELECT * FROM decks WHERE id=?", (deck_id,)).fetchone()
+        if user_key is None:
+            row = c.execute("SELECT * FROM decks WHERE id=?", (deck_id,)).fetchone()
+        else:
+            row = c.execute("SELECT * FROM decks WHERE id=? AND user_key=?", (deck_id, user_key)).fetchone()
     if not row:
         return None
     d = dict(row)
     return d if with_secrets else _public(d)
 
 
-def delete_deck(deck_id):
+def delete_deck(deck_id, user_key=None):
     with _conn() as c:
-        c.execute("DELETE FROM decks WHERE id=?", (deck_id,))
+        if user_key is None:
+            c.execute("DELETE FROM decks WHERE id=?", (deck_id,))
+        else:
+            c.execute("DELETE FROM decks WHERE id=? AND user_key=?", (deck_id, user_key))
 
 
 def set_webhook(deck_id, webhook_id, passcode):
@@ -157,13 +182,14 @@ def update_progress(deck_id, progress):
         c.execute("UPDATE decks SET last_status='building', build_progress=? WHERE id=?", (p, deck_id))
 
 
-def record_run(deck_id, status, slide_count=None, pptx_path=None):
+def record_run(deck_id, status, slide_count=None, pptx_path=None, file_version=None, frame_hashes=None):
     progress = 100 if status == "ok" else None
     with _conn() as c:
         c.execute(
             "UPDATE decks SET last_run=?, last_status=?, build_progress=?, slide_count=COALESCE(?, slide_count), "
-            "pptx_path=COALESCE(?, pptx_path) WHERE id=?",
-            (datetime.now().isoformat(), status, progress, slide_count, pptx_path, deck_id),
+            "pptx_path=COALESCE(?, pptx_path), file_version=COALESCE(?, file_version), "
+            "frame_hashes=COALESCE(?, frame_hashes) WHERE id=?",
+            (datetime.now().isoformat(), status, progress, slide_count, pptx_path, file_version, frame_hashes, deck_id),
         )
 
 
@@ -196,15 +222,17 @@ def clear_ms_account():
 
 # ---- saved Figma token (entered once, reused for every deck) ----
 
-def set_figma_token(token):
+def set_figma_token(token, user_key):
+    setting_key = _token_setting_key(user_key)
     with _conn() as c:
-        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('figma_token', ?)", (token,))
-        c.execute("UPDATE decks SET token=?", (token,))  # keep existing decks on the same token
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (setting_key, token))
+        c.execute("UPDATE decks SET token=? WHERE user_key=?", (token, user_key))
 
 
-def get_figma_token():
+def get_figma_token(user_key):
+    setting_key = _token_setting_key(user_key)
     with _conn() as c:
-        r = c.execute("SELECT value FROM settings WHERE key='figma_token'").fetchone()
+        r = c.execute("SELECT value FROM settings WHERE key=?", (setting_key,)).fetchone()
     return r["value"] if r else None
 
 

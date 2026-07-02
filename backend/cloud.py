@@ -33,7 +33,7 @@ SCOPES = "offline_access User.Read Files.ReadWrite"
 
 AUTH_BASE = f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0"
 GRAPH = "https://graph.microsoft.com/v1.0"
-FOLDER = "Figma Decks"  # OneDrive folder that holds the synced decks
+FOLDER = "FigPoint"  # OneDrive folder that holds the synced decks
 
 
 def is_configured() -> bool:

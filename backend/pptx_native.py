@@ -14,7 +14,10 @@ equivalent of Figma nesting / auto-layout). Content rotated, semi-transparent,
 or off-canvas is handled best-effort."""
 
 import io
+import json
 import math
+import hashlib
+import os
 
 from PIL import Image
 from pptx import Presentation
@@ -119,6 +122,8 @@ def build_deck(file_key, token, frames, out_path, progress_cb=None):
     total = len(frames)
     done = 0
 
+    cache = _RasterDiskCache(os.path.join(os.path.dirname(out_path), ".raster-cache"))
+
     for frame in frames:
         if not frame.get("absoluteBoundingBox"):
             done += 1
@@ -126,7 +131,7 @@ def build_deck(file_key, token, frames, out_path, progress_cb=None):
                 progress_cb(done, total)
             continue
         slide = prs.slides.add_slide(blank)
-        _render_frame(slide, file_key, token, frame)
+        _render_frame(slide, file_key, token, frame, cache)
         done += 1
         if progress_cb:
             progress_cb(done, total)
@@ -135,7 +140,7 @@ def build_deck(file_key, token, frames, out_path, progress_cb=None):
     return len(prs.slides._sldIdLst)
 
 
-def _render_frame(slide, file_key, token, frame):
+def _render_frame(slide, file_key, token, frame, cache):
     fb = frame["absoluteBoundingBox"]
     fx, fy, fw, fh = fb["x"], fb["y"], fb["width"], fb["height"]
     avail_w = int(SLIDE_W) - 2 * int(MARGIN)
@@ -162,8 +167,26 @@ def _render_frame(slide, file_key, token, frame):
     ops = []
     _walk(frame, ops, fb, is_root=True)
 
-    raster_ids = [n["id"] for kind, n in ops if kind == "raster"]
-    pngs = figma.render_frames(file_key, token, raster_ids) if raster_ids else {}
+    pngs = {}
+    missing_ids = []
+    missing_hashes = {}
+    for kind, node in ops:
+        if kind != "raster":
+            continue
+        nid = node["id"]
+        key = _node_hash(node)
+        cached = cache.get(key)
+        if cached is not None:
+            pngs[nid] = cached
+        else:
+            missing_ids.append(nid)
+            missing_hashes[nid] = key
+
+    if missing_ids:
+        rendered = figma.render_frames(file_key, token, missing_ids)
+        for nid, data in rendered.items():
+            pngs[nid] = data
+            cache.set(missing_hashes[nid], data)
 
     for kind, node in ops:
         try:
@@ -186,6 +209,38 @@ def _render_frame(slide, file_key, token, frame):
 def _xywh_of(node):
     b = node["absoluteBoundingBox"]
     return b["x"], b["y"], b["width"], b["height"]
+
+
+def _node_hash(node: dict) -> str:
+    blob = json.dumps(node, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+class _RasterDiskCache:
+    def __init__(self, root: str):
+        self.root = root
+        os.makedirs(self.root, exist_ok=True)
+
+    def _path(self, key: str) -> str:
+        return os.path.join(self.root, f"{key}.png")
+
+    def get(self, key: str):
+        p = self._path(key)
+        if not os.path.exists(p):
+            return None
+        try:
+            with open(p, "rb") as f:
+                return f.read()
+        except OSError:
+            return None
+
+    def set(self, key: str, data: bytes):
+        p = self._path(key)
+        try:
+            with open(p, "wb") as f:
+                f.write(data)
+        except OSError:
+            return
 
 
 def _outside(b, root, tol=2):

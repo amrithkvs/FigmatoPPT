@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Azure deployment for Figma Deck
+# Azure deployment for FigPoint
 # Prereqs:
 #   1. az login
 #   2. az account set --subscription <subscription-id-or-name>  (optional if default is correct)
@@ -10,23 +10,23 @@ set -euo pipefail
 #   ./deploy_azure.sh
 # Optional overrides:
 #   AZ_LOCATION=eastus
-#   AZ_RESOURCE_GROUP=figma-deck-rg
-#   AZ_APP_NAME=figma-deck-app-<suffix>
-#   AZ_PLAN_NAME=figma-deck-plan
+#   AZ_RESOURCE_GROUP=figpoint-rg
+#   AZ_APP_NAME=figpoint-app-<suffix>
+#   AZ_PLAN_NAME=figpoint-plan
 #   AZ_ACR_NAME=figmadeckacr<suffix>
 #   AZ_STORAGE_NAME=figmadeckst<suffix>
 #   AZ_SHARE_NAME=figmadeckdata
-#   AZ_IMAGE_NAME=figma-deck:latest
+#   AZ_IMAGE_NAME=figpoint:latest
 
 suffix_default=$(date +%m%d%H%M)
 AZ_LOCATION=${AZ_LOCATION:-eastus}
-AZ_RESOURCE_GROUP=${AZ_RESOURCE_GROUP:-figma-deck-rg}
-AZ_PLAN_NAME=${AZ_PLAN_NAME:-figma-deck-plan}
-AZ_APP_NAME=${AZ_APP_NAME:-figma-deck-app-${suffix_default}}
+AZ_RESOURCE_GROUP=${AZ_RESOURCE_GROUP:-figpoint-rg}
+AZ_PLAN_NAME=${AZ_PLAN_NAME:-figpoint-plan}
+AZ_APP_NAME=${AZ_APP_NAME:-figpoint-app-${suffix_default}}
 AZ_ACR_NAME=${AZ_ACR_NAME:-figmadeckacr${suffix_default}}
 AZ_STORAGE_NAME=${AZ_STORAGE_NAME:-figmadeckst${suffix_default}}
 AZ_SHARE_NAME=${AZ_SHARE_NAME:-figmadeckdata}
-AZ_IMAGE_NAME=${AZ_IMAGE_NAME:-figma-deck:latest}
+AZ_IMAGE_NAME=${AZ_IMAGE_NAME:-figpoint:latest}
 WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-https://${AZ_APP_NAME}.azurewebsites.net}
 FIGMA_DECK_DB_PATH=${FIGMA_DECK_DB_PATH:-/data/decks/data.db}
 DECKS_OUTPUT_DIR=${DECKS_OUTPUT_DIR:-/data/decks}

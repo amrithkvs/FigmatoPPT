@@ -1,4 +1,4 @@
-Deploy Figma Deck to Render (one shared URL)
+Deploy FigPoint to Render (one shared URL)
 
 What I already prepared in this repo:
 - Dockerfile
@@ -10,7 +10,7 @@ Step 1: Put this project in GitHub
 2. From the project folder, run:
    git init
    git add .
-   git commit -m "Initial Figma Deck deployment setup"
+   git commit -m "Initial FigPoint deployment setup"
    git branch -M main
    git remote add origin <your-github-repo-url>
    git push -u origin main

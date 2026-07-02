@@ -70,11 +70,18 @@ def validate_token(token: str) -> None:
     r.raise_for_status()
 
 
-def list_frames(file_key: str, token: str, page_node_id: str = None) -> list[dict]:
+def list_frames(file_key: str, token: str, page_node_id: str = None, include_version: bool = False):
     """Return top-level frames as {id, name, page}. If page_node_id is given (the
-    node from the file URL), return only frames from the page that contains it."""
+    node from the file URL), return only frames from the page that contains it.
+    When include_version=True, returns (frames, file_version)."""
     try:
-        r = _get_with_retries(f"{API}/files/{file_key}", headers=_headers(token), timeout=60, retries=3)
+        r = _get_with_retries(
+            f"{API}/files/{file_key}",
+            headers=_headers(token),
+            params={"depth": 2},
+            timeout=60,
+            retries=3,
+        )
     except requests.exceptions.ReadTimeout as e:
         raise TimeoutError("Figma API timed out while reading the file. Please retry in a moment.") from e
     except requests.exceptions.RequestException as e:
@@ -85,7 +92,8 @@ def list_frames(file_key: str, token: str, page_node_id: str = None) -> list[dic
         raise FileNotFoundError("Figma file not found (404). Check the URL and token access.")
     r.raise_for_status()
 
-    doc = r.json()["document"]
+    payload = r.json()
+    doc = payload["document"]
     pages = [p for p in doc.get("children", []) if p.get("type") == "CANVAS"]
 
     # Scope to just the selected page when the URL points at one.
@@ -106,6 +114,8 @@ def list_frames(file_key: str, token: str, page_node_id: str = None) -> list[dic
         page_frames.sort(key=pos)
         for node in page_frames:
             frames.append({"id": node["id"], "name": node.get("name", "Frame"), "page": page.get("name", "")})
+    if include_version:
+        return frames, payload.get("version")
     return frames
 
 
@@ -220,7 +230,7 @@ def create_webhook(token: str, file_key: str, endpoint: str, passcode: str) -> s
             "context_id": file_key,
             "endpoint": endpoint,
             "passcode": passcode,
-            "description": "figma-deck live sync",
+            "description": "figpoint live sync",
         },
         timeout=60,
     )

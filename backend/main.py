@@ -4,6 +4,8 @@ regenerate on a daily schedule (default midnight + 5pm)."""
 import os
 import re
 import secrets
+import json
+import hashlib
 import subprocess
 import sys
 import time
@@ -13,6 +15,7 @@ from typing import List, Optional, Set
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -20,6 +23,8 @@ import figma
 import pptx_native
 import store
 import cloud
+
+USER_KEY_HEADER = "X-User-Key"
 
 def _resource(*parts):
     # Resolve bundled read-only files (the frontend) in both dev and packaged modes.
@@ -35,17 +40,28 @@ MICROSOFT_LOGO = _resource("Microsoft-logo.svg")
 # The live, auto-updating deck files live in a clean, discoverable folder that the
 # user opens directly — NOT inside the project, and NOT a frozen browser-download
 # copy. Override with DECKS_OUTPUT_DIR if you want them somewhere else.
-OUTPUT_DIR = os.environ.get("DECKS_OUTPUT_DIR") or os.path.expanduser("~/Documents/Figma Decks")
+OUTPUT_DIR = os.environ.get("DECKS_OUTPUT_DIR") or os.path.expanduser("~/Documents/Figma decks")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Public HTTPS base URL Figma can reach (e.g. a cloudflared tunnel or the
 # deployed host). Without it, live-sync can't be registered and decks fall
 # back to the daily safety refresh.
 WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "").rstrip("/")
+SKIP_UNCHANGED_REFRESH = os.environ.get("SKIP_UNCHANGED_REFRESH", "0") == "1"
 
-app = FastAPI(title="Figma → Deck")
+app = FastAPI(title="FigPoint")
 scheduler = BackgroundScheduler()
 _ms_oauth_states: Set[str] = set()
+
+_cors_raw = os.environ.get("CORS_ALLOW_ORIGINS", "https://m365sandbox.microsoft.com")
+_cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ---------- file helpers ----------
@@ -56,7 +72,7 @@ def _safe_name(name: str) -> str:
 
 
 def deck_path(deck: dict) -> str:
-    """The single live file for a deck, in ~/Documents/Figma Decks. Overwritten on
+    """The single live file for a deck, in ~/Documents/FigPoint. Overwritten on
     every rebuild, so the user opens ONE stable file that always reflects Figma —
     not a frozen download copy."""
     return os.path.join(OUTPUT_DIR, f"{_safe_name(deck['name'])}.pptx")
@@ -72,7 +88,15 @@ def generate(deck_id: int) -> dict:
     try:
         store.update_progress(deck_id, 0)
         page = figma.parse_node_id(deck["figma_url"])  # scope to the page in the URL
-        frames = figma.list_frames(deck["file_key"], deck["token"], page)
+        frames, file_version = figma.list_frames(deck["file_key"], deck["token"], page, include_version=True)
+
+        # Optional fast path (disabled by default): if the Figma file version is
+        # unchanged, keep the existing PPTX and finish instantly.
+        if SKIP_UNCHANGED_REFRESH and file_version and deck.get("file_version") and file_version == deck.get("file_version"):
+            store.update_progress(deck_id, 100)
+            store.record_run(deck_id, "ok", slide_count=deck.get("slide_count"), file_version=file_version)
+            return {"ok": True, "slides": deck.get("slide_count") or 0, "unchanged": True}
+
         if not frames:
             store.record_run(deck_id, "no frames found")
             return {"ok": False, "error": "No top-level frames found in that file."}
@@ -85,6 +109,28 @@ def generate(deck_id: int) -> dict:
         store.update_progress(deck_id, 30)
         ordered = [detail[f["id"]] for f in frames if f["id"] in detail]
 
+        frame_hashes = {}
+        for frame in frames:
+            nid = frame["id"]
+            node = detail.get(nid)
+            if not node:
+                continue
+            blob = json.dumps(node, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            frame_hashes[nid] = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+        prev_hashes = {}
+        if deck.get("frame_hashes"):
+            try:
+                prev_hashes = json.loads(deck["frame_hashes"])
+            except Exception:  # noqa: BLE001
+                prev_hashes = {}
+        changed_frames = [fid for fid, h in frame_hashes.items() if prev_hashes.get(fid) != h]
+        if prev_hashes:
+            print(
+                f"[deck {deck_id}] changed frames: {len(changed_frames)}/{len(frame_hashes)}",
+                flush=True,
+            )
+
         out_path = deck_path(deck)
         def _progress(done, all_frames):
             capped_total = max(1, all_frames)
@@ -93,7 +139,14 @@ def generate(deck_id: int) -> dict:
 
         count = pptx_native.build_deck(deck["file_key"], deck["token"], ordered, out_path, progress_cb=_progress)
         store.update_progress(deck_id, 99)
-        store.record_run(deck_id, "ok", slide_count=count, pptx_path=out_path)
+        store.record_run(
+            deck_id,
+            "ok",
+            slide_count=count,
+            pptx_path=out_path,
+            file_version=file_version,
+            frame_hashes=json.dumps(frame_hashes),
+        )
         # Best effort cloud sync for PowerPoint web open; never fails the build.
         cloud.sync_deck(deck_id, out_path)
         print(f"[deck {deck_id}] done: {count} slides in {time.time() - t0:.1f}s", flush=True)
@@ -196,27 +249,37 @@ def _mask_token(t: str) -> str:
     return f"{t[:6]}…{t[-4:]}" if t and len(t) > 12 else "saved"
 
 
+def _user_key(req: Request) -> str:
+    # Accept header first, with query-param fallback for download URLs opened in a new tab.
+    key = (req.headers.get(USER_KEY_HEADER) or req.query_params.get("user_key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing user key.")
+    if len(key) > 128 or not re.fullmatch(r"[A-Za-z0-9._:-]+", key):
+        raise HTTPException(status_code=400, detail="Invalid user key.")
+    return key
+
+
 @app.get("/api/figma-token")
-def figma_token_status():
-    t = store.get_figma_token()
+def figma_token_status(request: Request):
+    t = store.get_figma_token(_user_key(request))
     return {"saved": bool(t), "hint": _mask_token(t) if t else None}
 
 
 @app.post("/api/figma-token")
-def save_figma_token(body: TokenIn):
+def save_figma_token(body: TokenIn, request: Request):
     token = (body.token or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail="Token is empty.")
     # Don't validate against /v1/me here — that needs a user-profile scope we don't
     # ask for. The token only needs File-content access, which is verified for real
     # when a deck is created (list_frames). Just save it.
-    store.set_figma_token(token)
+    store.set_figma_token(token, _user_key(request))
     return {"saved": True, "hint": _mask_token(token)}
 
 
 @app.get("/api/decks")
-def get_decks():
-    return store.list_decks()
+def get_decks(request: Request):
+    return store.list_decks(_user_key(request))
 
 
 @app.get("/api/ms/status")
@@ -256,8 +319,9 @@ def ms_disconnect():
 
 
 @app.post("/api/decks")
-def create_deck(body: DeckIn, bg: BackgroundTasks):
-    token = body.token or store.get_figma_token()
+def create_deck(body: DeckIn, bg: BackgroundTasks, request: Request):
+    user_key = _user_key(request)
+    token = body.token or store.get_figma_token(user_key)
     if not token:
         raise HTTPException(status_code=400, detail="Save your Figma token first.")
     try:
@@ -272,11 +336,11 @@ def create_deck(body: DeckIn, bg: BackgroundTasks):
         raise HTTPException(status_code=400, detail=str(e))
 
     if body.token:
-        store.set_figma_token(body.token)  # remember a freshly-entered token
+        store.set_figma_token(body.token, user_key)  # remember a freshly-entered token
 
     times = body.times or ["03:00"]  # daily safety net; live-sync is primary
     name = body.name or (frames[0]["page"] if frames else "Untitled deck")
-    deck_id = store.add_deck(name, body.figma_url, file_key, token, times)
+    deck_id = store.add_deck(name, body.figma_url, file_key, token, times, user_key)
     store.mark_building(deck_id)
 
     deck = store.get_deck(deck_id)
@@ -302,8 +366,8 @@ async def figma_webhook(req: Request, bg: BackgroundTasks):
 
 
 @app.post("/api/decks/{deck_id}/generate")
-def regenerate(deck_id: int, bg: BackgroundTasks):
-    deck = store.get_deck(deck_id)
+def regenerate(deck_id: int, bg: BackgroundTasks, request: Request):
+    deck = store.get_deck(deck_id, user_key=_user_key(request))
     if not deck:
         raise HTTPException(status_code=404, detail="deck not found")
     if deck.get("last_status") == "building":
@@ -314,26 +378,39 @@ def regenerate(deck_id: int, bg: BackgroundTasks):
 
 
 @app.get("/api/decks/{deck_id}/download")
-def download(deck_id: int):
-    deck = store.get_deck(deck_id)
+def download(deck_id: int, request: Request):
+    deck = store.get_deck(deck_id, user_key=_user_key(request))
     if not deck or not deck.get("pptx_path") or not os.path.exists(deck["pptx_path"]):
         raise HTTPException(status_code=404, detail="No deck generated yet.")
     fname = f"{deck['name'].replace('/', '-')}.pptx"
     return FileResponse(deck["pptx_path"], filename=fname)
 
 
-def _existing_path(deck_id: int) -> str:
-    deck = store.get_deck(deck_id)
+def _existing_path(deck_id: int, user_key: str) -> str:
+    deck = store.get_deck(deck_id, user_key=user_key)
     if not deck or not deck.get("pptx_path") or not os.path.exists(deck["pptx_path"]):
         raise HTTPException(status_code=404, detail="No deck generated yet.")
     return deck["pptx_path"]
 
 
+def _can_open_desktop_apps() -> bool:
+    # Hosted Linux containers have no GUI, so open/reveal should fall back.
+    if sys.platform.startswith("linux"):
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return True
+
+
 @app.post("/api/decks/{deck_id}/open")
-def open_deck(deck_id: int):
+def open_deck(deck_id: int, request: Request):
     """Open the deck's single canonical file in PowerPoint on this machine. Every
     rebuild overwrites that same file — no pile-up of downloaded copies."""
-    path = _existing_path(deck_id)
+    path = _existing_path(deck_id, _user_key(request))
+    if not _can_open_desktop_apps():
+        return {
+            "ok": True,
+            "download_url": f"/api/decks/{deck_id}/download",
+            "note": "Hosted backend cannot open desktop apps. Use download instead.",
+        }
     if sys.platform == "darwin":
         subprocess.Popen(["open", path])
     elif sys.platform.startswith("win"):
@@ -344,9 +421,15 @@ def open_deck(deck_id: int):
 
 
 @app.post("/api/decks/{deck_id}/reveal")
-def reveal_deck(deck_id: int):
+def reveal_deck(deck_id: int, request: Request):
     """Reveal the deck file in Finder/Explorer."""
-    path = _existing_path(deck_id)
+    path = _existing_path(deck_id, _user_key(request))
+    if not _can_open_desktop_apps():
+        return {
+            "ok": True,
+            "download_url": f"/api/decks/{deck_id}/download",
+            "note": "Hosted backend has no Finder/Explorer. Use download instead.",
+        }
     if sys.platform == "darwin":
         subprocess.Popen(["open", "-R", path])
     elif sys.platform.startswith("win"):
@@ -357,8 +440,9 @@ def reveal_deck(deck_id: int):
 
 
 @app.delete("/api/decks/{deck_id}")
-def remove(deck_id: int):
-    deck = store.get_deck(deck_id, with_secrets=True)
+def remove(deck_id: int, request: Request):
+    user_key = _user_key(request)
+    deck = store.get_deck(deck_id, with_secrets=True, user_key=user_key)
     if deck and deck.get("webhook_id"):
         figma.delete_webhook(deck["token"], deck["webhook_id"])  # best effort
     if deck and deck.get("pptx_path") and os.path.exists(deck["pptx_path"]):
@@ -369,5 +453,5 @@ def remove(deck_id: int):
     for job in list(scheduler.get_jobs()):
         if job.id.startswith(f"deck-{deck_id}-"):
             job.remove()
-    store.delete_deck(deck_id)
+    store.delete_deck(deck_id, user_key=user_key)
     return {"ok": True}

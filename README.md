@@ -1,4 +1,4 @@
-# Figma → Deck
+# FigPoint
 
 Point it at a Figma file once. It builds an **editable** PowerPoint — real text
 and shapes, not flat images — and **rebuilds automatically whenever the Figma
@@ -129,7 +129,7 @@ deck **auto-refreshes while open** — ideal for sharing org-wide.
 ### One-time Azure setup (only your org admin can do this)
 
 1. **Azure Portal → App registrations → New registration.**
-   - Name: `Figma Deck Sync`
+  - Name: `FigPoint Sync`
    - Supported accounts: *single tenant* for your org (or *multitenant* to share org-wide)
    - Redirect URI: **Web** → `http://localhost:8000/auth/ms/callback`
      (add your hosted URL too once deployed)

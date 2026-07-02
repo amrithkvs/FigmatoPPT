@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: figma-deck
+    name: figpoint
     env: docker
     plan: starter
     autoDeploy: true
@@ -21,6 +21,6 @@ services:
       - key: MS_LOGIN_HINT
         sync: false
     disk:
-      name: figma-deck-data
+      name: figpoint-data
       mountPath: /data
       sizeGB: 5

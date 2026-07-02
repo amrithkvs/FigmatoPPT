@@ -232,6 +232,9 @@
   .loc { font-size: 13px; color: var(--muted); margin: 0 2px 14px; line-height: 1.55; }
   .loc code { background: #101721; padding: 2px 6px; border-radius: 6px; font-size: 12px; color: #dbe6f7; border: 1px solid #3a475d; }
   .deck .status { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .deck-note { font-size: 12px; color: var(--muted); margin-top: 4px; font-weight: 500; }
+
+  .create-card { margin-bottom: 26px; }
 
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
   .dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.idle { background: #9ca3af; }
@@ -281,7 +284,7 @@
     text-transform: uppercase;
     letter-spacing: .1em;
     color: #cdd6e4;
-    margin: 14px 0 14px;
+    margin: 14px 0 6px;
     font-weight: 700;
   }
 
@@ -311,13 +314,13 @@
 </head>
 <body>
 <main class="wrap" aria-label="FigPoint app">
-  <h1><span class="title-light">Welcome to </span><span class="title-strong">FigPoint</span></h1>
+  <h1><span class="title-light">Welcome to </span><span class="title-strong">FigPoint</span><span class="title-light">, Amrith</span></h1>
   <p class="sub">Connect a Figma file once, and we'll generate an editable PowerPoint with real text and shapes, not static images. You can manually refresh anytime to pull in the latest design updates.</p>
 
   <div class="card" id="tokencard"><!-- filled by JS: token form, or saved state --></div>
   <div class="card" id="mscard"><!-- filled by JS: microsoft cloud sync status --></div>
 
-  <div class="card">
+  <div class="card create-card">
     <label class="label-with-icon"><img src="/assets/figma-logo.webp" alt="" aria-hidden="true" />Figma file URL</label>
     <input id="url" type="text" placeholder="https://www.figma.com/design/…" autocomplete="url" />
 
@@ -326,7 +329,7 @@
   </div>
 
   <h2>Your decks</h2>
-  <p class="loc">The live file lives in <code id="locdir">~/Documents/Figma Decks</code>. <b>Open</b> launches that one file — it auto-updates on every refresh (fully quit &amp; reopen PowerPoint, ⌘Q, to see changes).</p>
+  <p class="loc">To view changes made in Figma, click Refresh and fully quit &amp; reopen PowerPoint, ⌘Q, to see changes.</p>
   <div class="card" id="decks"><div class="empty">No decks yet.</div></div>
 </main>
 
@@ -334,18 +337,335 @@
 const $ = (id) => document.getElementById(id);
 const SHOW_SYNC_BADGE = false;
 const SHOW_MS_SYNC_CARD = false;
+const USER_KEY_STORAGE_KEY = "figpoint_user_key";
+
+function generateUserKey() {
+  try {
+    if (window.crypto && window.crypto.randomUUID) {
+      return window.crypto.randomUUID();
+    }
+  } catch {}
+  return `u-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getOrCreateUserKey() {
+  try {
+    const existing = (localStorage.getItem(USER_KEY_STORAGE_KEY) || "").trim();
+    if (existing) return existing;
+    const created = generateUserKey();
+    localStorage.setItem(USER_KEY_STORAGE_KEY, created);
+    return created;
+  } catch {
+    return generateUserKey();
+  }
+}
+
+const USER_KEY = getOrCreateUserKey();
+const TOKEN_STORAGE_KEY = `figpoint_figma_token_${USER_KEY}`;
+const SAVED_DECKS_STORAGE_KEY = `figpoint_saved_decks_${USER_KEY}`;
+const HANDLE_DB_NAME = "figpoint-file-handles";
+const HANDLE_STORE = "deckHandles";
+const linkedDeckFiles = new Map();
+const lastLocalSyncRun = new Map();
+const pendingLocalSync = new Set();
+const deckNameById = new Map();
+const deckLastRunById = new Map();
+const savedLocationByDeck = new Map();
+const savedDeckIds = new Set();
+let tokenRestoreInFlight = false;
+let handlesReady = false;
+
+function normalizeApiBase(v) {
+  const raw = (v || "").trim();
+  if (!raw) return "";
+  return raw.replace(/\/$/, "");
+}
+
+function detectApiBase() {
+  const params = new URLSearchParams(window.location.search);
+  const paramBase = normalizeApiBase(params.get("api_base") || "");
+  if (paramBase) {
+    try { localStorage.setItem("figpoint_api_base", paramBase); } catch {}
+    return paramBase;
+  }
+  try {
+    const saved = normalizeApiBase(localStorage.getItem("figpoint_api_base") || "");
+    if (saved) return saved;
+  } catch {}
+  return "";
+}
+
+const API_BASE = detectApiBase();
+
+function apiUrl(path) {
+  if (!API_BASE) return path;
+  return `${API_BASE}${path}`;
+}
+
+function userScopedPath(path) {
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}user_key=${encodeURIComponent(USER_KEY)}`;
+}
 
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  const options = { ...(opts || {}) };
+  const headers = { ...(options.headers || {}) };
+  headers["X-User-Key"] = USER_KEY;
+  options.headers = headers;
+  const r = await fetch(apiUrl(path), options);
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.detail || data.error || "Request failed");
   return data;
 }
 
+function showSandboxApiHint() {
+  const onSandbox = location.hostname.includes("m365sandbox.microsoft.com");
+  if (!onSandbox || API_BASE) return;
+  const msg = $("msg");
+  if (!msg) return;
+  msg.className = "msg err";
+  msg.textContent = "Set ?api_base=https://your-backend-host on this URL to enable API calls in M365 Sandbox.";
+}
+
+function supportsLocalOverwrite() {
+  return !!(window.isSecureContext && window.showSaveFilePicker);
+}
+
+function suggestedDeckFilename(name) {
+  const base = (name || "deck").replace(/[\\/:*?"<>|]/g, "-").trim() || "deck";
+  return base.toLowerCase().endsWith(".pptx") ? base : `${base}.pptx`;
+}
+
+function setMsg(text, kind = "") {
+  const msg = $("msg");
+  if (!msg) return;
+  msg.className = kind ? `msg ${kind}` : "msg";
+  msg.textContent = text || "";
+}
+
+function getStoredToken() {
+  try {
+    return (localStorage.getItem(TOKEN_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function setStoredToken(token) {
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token || "");
+  } catch {}
+}
+
+function loadSavedDeckIds() {
+  try {
+    const raw = localStorage.getItem(SAVED_DECKS_STORAGE_KEY) || "[]";
+    const arr = JSON.parse(raw);
+    savedDeckIds.clear();
+    if (Array.isArray(arr)) {
+      for (const id of arr) {
+        const n = Number(id);
+        if (Number.isInteger(n) && n > 0) savedDeckIds.add(n);
+      }
+    }
+  } catch {
+    savedDeckIds.clear();
+  }
+}
+
+function persistSavedDeckIds() {
+  try {
+    localStorage.setItem(SAVED_DECKS_STORAGE_KEY, JSON.stringify(Array.from(savedDeckIds)));
+  } catch {}
+}
+
+function handleRecordKey(deckId) {
+  return `${USER_KEY}:${deckId}`;
+}
+
+function openHandleDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(HANDLE_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(HANDLE_STORE)) {
+        db.createObjectStore(HANDLE_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("Failed to open handle DB"));
+  });
+}
+
+async function loadStoredHandle(deckId) {
+  const db = await openHandleDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(HANDLE_STORE, "readonly");
+    const store = tx.objectStore(HANDLE_STORE);
+    const req = store.get(handleRecordKey(deckId));
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error || new Error("Failed to load file handle"));
+  });
+}
+
+async function saveStoredHandle(deckId, handle) {
+  const db = await openHandleDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(HANDLE_STORE, "readwrite");
+    tx.objectStore(HANDLE_STORE).put(handle, handleRecordKey(deckId));
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to save file handle"));
+  });
+}
+
+async function deleteStoredHandle(deckId) {
+  const db = await openHandleDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(HANDLE_STORE, "readwrite");
+    tx.objectStore(HANDLE_STORE).delete(handleRecordKey(deckId));
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("Failed to delete file handle"));
+  });
+}
+
+async function restoreHandlesForDecks(decks) {
+  if (!supportsLocalOverwrite()) return;
+  const liveIds = new Set(decks.map((d) => d.id));
+  let changed = false;
+
+  for (const id of Array.from(savedDeckIds)) {
+    if (!liveIds.has(id)) {
+      savedDeckIds.delete(id);
+      changed = true;
+    }
+  }
+
+  for (const d of decks) {
+    if (!savedDeckIds.has(d.id) || linkedDeckFiles.has(d.id)) continue;
+    try {
+      const handle = await loadStoredHandle(d.id);
+      if (handle) {
+        linkedDeckFiles.set(d.id, handle);
+      } else {
+        savedDeckIds.delete(d.id);
+        changed = true;
+      }
+    } catch {
+      savedDeckIds.delete(d.id);
+      changed = true;
+    }
+  }
+
+  if (changed) persistSavedDeckIds();
+}
+
+async function fetchDeckBlob(deckId) {
+  const r = await fetch(apiUrl(userScopedPath(`/api/decks/${deckId}/download`)), {
+    headers: { "X-User-Key": USER_KEY },
+  });
+  if (!r.ok) {
+    let detail = "Failed to download deck";
+    try {
+      const d = await r.json();
+      if (d && (d.detail || d.error)) detail = d.detail || d.error;
+    } catch {}
+    throw new Error(detail);
+  }
+  return r.blob();
+}
+
+async function writeBlobToHandle(handle, blob) {
+  const w = await handle.createWritable();
+  await w.write(blob);
+  await w.close();
+}
+
+async function ensureWritePermission(handle, requestInteractive) {
+  if (!handle || !handle.queryPermission) return true;
+  let state = "prompt";
+  try {
+    state = await handle.queryPermission({ mode: "readwrite" });
+  } catch {
+    return true;
+  }
+  if (state === "granted") return true;
+  if (!requestInteractive || !handle.requestPermission) return false;
+  try {
+    state = await handle.requestPermission({ mode: "readwrite" });
+    return state === "granted";
+  } catch {
+    return false;
+  }
+}
+
+async function saveDeckToLinkedFile(deckId, deckName, allowPicker) {
+  if (!supportsLocalOverwrite()) return false;
+  let handle = linkedDeckFiles.get(deckId);
+  if (!handle && !allowPicker) return false;
+  if (!handle) {
+    handle = await window.showSaveFilePicker({
+      startIn: "desktop",
+      suggestedName: suggestedDeckFilename(deckName),
+      types: [{
+        description: "PowerPoint",
+        accept: {
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
+        },
+      }],
+    });
+    linkedDeckFiles.set(deckId, handle);
+    try { await saveStoredHandle(deckId, handle); } catch {}
+  }
+  const canWrite = await ensureWritePermission(handle, allowPicker);
+  if (!canWrite) {
+    const err = new Error("Write permission is required.");
+    err.code = "permission_required";
+    throw err;
+  }
+  const blob = await fetchDeckBlob(deckId);
+  await writeBlobToHandle(handle, blob);
+  return handle;
+}
+
+async function syncDeckFileIfNeeded(d) {
+  if (!d || d.last_status !== "ok") return;
+  if (!linkedDeckFiles.has(d.id)) return;
+  const run = d.last_run || "";
+  if (!run) return;
+  if (!pendingLocalSync.has(d.id) && lastLocalSyncRun.get(d.id) === run) return;
+  try {
+    const savedHandle = await saveDeckToLinkedFile(d.id, d.name, false);
+    if (savedHandle) {
+      lastLocalSyncRun.set(d.id, run);
+      pendingLocalSync.delete(d.id);
+    }
+  } catch (e) {
+    const errCode = e && e.code ? e.code : "";
+    const errName = (e && e.name) ? e.name : "";
+    if (errCode === "permission_required" || errName === "NotAllowedError" || errName === "SecurityError") {
+      // Background polling has no user activation. Don't spam an error message;
+      // the next explicit Refresh click will request permission interactively.
+      pendingLocalSync.delete(d.id);
+      return;
+    } else if (errName !== "AbortError") {
+      setMsg(e.message || "Could not update the linked local file.", "err");
+    }
+    pendingLocalSync.delete(d.id);
+  }
+}
+
 function fmt(iso) {
   if (!iso) return "never";
-  const d = new Date(iso);
-  return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const normalized = /([zZ]|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`;
+  const d = new Date(normalized);
+  return new Intl.DateTimeFormat([], {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d);
 }
 
 function isBuilding(d) { return !d.last_run || d.last_status === "building"; }
@@ -353,6 +673,7 @@ function isBuilding(d) { return !d.last_run || d.last_status === "building"; }
 function deckRow(d) {
   const ok = d.last_status === "ok";
   const building = isBuilding(d);
+  const linked = linkedDeckFiles.has(d.id) || savedDeckIds.has(d.id);
   const progress = Math.max(0, Math.min(100, Number(d.build_progress ?? 0)));
   const cls = building ? "idle" : ok ? "ok" : "err";
   const status = building
@@ -363,6 +684,11 @@ function deckRow(d) {
   const sync = d.live_sync
     ? `<span class="sync on">● Live sync</span>`
     : `<span class="sync off">○ Daily refresh</span>`;
+  const actions = ok
+    ? linked
+      ? `<button class="ghost" onclick="regen(${d.id})" ${building ? "disabled" : ""}>Refresh</button>`
+      : `<button onclick="saveDeck(${d.id})" ${building ? "disabled" : ""}>Save</button>`
+    : ``;
   return `
     <div class="deck" data-id="${d.id}">
       <div class="meta">
@@ -370,32 +696,31 @@ function deckRow(d) {
         <div class="status"><span class="dot ${cls}"></span>${status}</div>
       </div>
       <div class="row">
-        <button class="ghost" onclick="regen(${d.id})" ${building ? "disabled" : ""}>Refresh</button>
-          <div class="menu">
-            <button onclick="toggleDeckMenu(${d.id})" ${ok ? "" : "disabled"} title="Open actions">Open ▾</button>
-            <div class="menu-pop" id="menu-${d.id}" hidden>
-              <button onclick="openDeck(${d.id}); closeDeckMenus();">Open</button>
-              <button onclick="revealDeck(${d.id}); closeDeckMenus();">Reveal in Finder</button>
-            </div>
-          </div>
+        ${actions}
         <button class="danger" type="button" aria-label="Delete deck" title="Delete deck" onclick="del(${d.id})">✕</button>
       </div>
     </div>`;
 }
 
-function closeDeckMenus() {
-  document.querySelectorAll('.menu-pop').forEach((el) => { el.hidden = true; });
-}
-
-function toggleDeckMenu(id) {
-  const el = document.getElementById(`menu-${id}`);
-  if (!el) return;
-  const willOpen = el.hidden;
-  closeDeckMenus();
-  el.hidden = !willOpen;
-}
-
 function render(decks) {
+  deckNameById.clear();
+  deckLastRunById.clear();
+  const liveIds = new Set();
+  for (const d of decks) {
+    liveIds.add(d.id);
+    deckNameById.set(d.id, d.name || "deck");
+    deckLastRunById.set(d.id, d.last_run || "");
+  }
+  // Cleanup stale saved markers for deleted decks.
+  let changed = false;
+  for (const id of Array.from(savedDeckIds)) {
+    if (!liveIds.has(id)) {
+      savedDeckIds.delete(id);
+      changed = true;
+    }
+  }
+  if (changed) persistSavedDeckIds();
+
   $("decks").innerHTML = decks.length
     ? decks.map(deckRow).join("")
     : `<div class="empty">No decks yet.</div>`;
@@ -404,7 +729,14 @@ function render(decks) {
 
 async function load() {
   const decks = await api("/api/decks");
+  if (!handlesReady) {
+    await restoreHandlesForDecks(decks);
+    handlesReady = true;
+  }
   render(decks);
+  for (const d of decks) {
+    await syncDeckFileIfNeeded(d);
+  }
   return decks;
 }
 
@@ -449,6 +781,23 @@ let tokenSaved = false;
 async function loadToken() {
   let s;
   try { s = await api("/api/figma-token"); } catch { return; }
+  if (!s.saved && !tokenRestoreInFlight) {
+    const cached = getStoredToken();
+    if (cached) {
+      tokenRestoreInFlight = true;
+      try {
+        await api("/api/figma-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: cached }),
+        });
+        tokenRestoreInFlight = false;
+        return loadToken();
+      } catch {
+        tokenRestoreInFlight = false;
+      }
+    }
+  }
   tokenSaved = s.saved;
   if (s.saved) {
     $("tokencard").innerHTML = `<div class="tokrow saved">
@@ -485,6 +834,7 @@ async function saveToken() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: t }),
     });
+    setStoredToken(t);
     await loadToken();
   } catch (e) {
     tm.className = "msg err"; tm.textContent = e.message;
@@ -493,26 +843,63 @@ async function saveToken() {
 }
 
 async function regen(id) {
+  setMsg("");
+  if (linkedDeckFiles.has(id)) {
+    const handle = linkedDeckFiles.get(id);
+    const ok = await ensureWritePermission(handle, true);
+    if (!ok) {
+      setMsg("Please allow file access to update this saved deck.", "err");
+      return;
+    }
+  }
   await api(`/api/decks/${id}/generate`, { method: "POST" });
+  if (linkedDeckFiles.has(id)) pendingLocalSync.add(id);
   await load();  // flips to "Building…" and polling takes over
 }
-async function openDeck(id) { await api(`/api/decks/${id}/open`, { method: "POST" }); }
-async function revealDeck(id) { await api(`/api/decks/${id}/reveal`, { method: "POST" }); }
+async function saveDeck(id) {
+  setMsg("");
+  const deckName = deckNameById.get(id) || "deck";
+  if (supportsLocalOverwrite()) {
+    try {
+      const savedHandle = await saveDeckToLinkedFile(id, deckName, true);
+      if (!savedHandle) return;
+      const label = `Saved to your selected folder/"${savedHandle.name}"`;
+      savedLocationByDeck.set(id, label);
+      const run = deckLastRunById.get(id);
+      if (run) lastLocalSyncRun.set(id, run);
+      pendingLocalSync.delete(id);
+      savedDeckIds.add(id);
+      persistSavedDeckIds();
+      await load();
+      return;
+    } catch (e) {
+      const errCode = e && e.code ? e.code : "";
+      if (errCode === "permission_required") {
+        setMsg("Browser blocked write permission. Click Save again and approve access.", "err");
+        return;
+      }
+      if (!(e && e.name === "AbortError")) {
+        setMsg(e.message || "Could not save deck to a local file.", "err");
+      }
+    }
+  }
+
+  // Fallback when File System Access API is unavailable.
+  window.open(apiUrl(userScopedPath(`/api/decks/${id}/download`)), "_blank", "noopener,noreferrer");
+}
 async function del(id) {
   if (!confirm("Delete this deck and its schedule?")) return;
+  linkedDeckFiles.delete(id);
+  lastLocalSyncRun.delete(id);
+  pendingLocalSync.delete(id);
+  deckNameById.delete(id);
+  deckLastRunById.delete(id);
+  savedLocationByDeck.delete(id);
+  savedDeckIds.delete(id);
+  persistSavedDeckIds();
+  try { await deleteStoredHandle(id); } catch {}
   await api(`/api/decks/${id}`, { method: "DELETE" });
   await load();
-}
-
-document.addEventListener("click", (e) => {
-  if (!e.target.closest('.menu')) closeDeckMenus();
-});
-
-async function loadConfig() {
-  try {
-    const c = await api("/api/config");
-    if (c.output_dir) $("locdir").textContent = c.output_dir.replace(/^\/Users\/[^/]+/, "~");
-  } catch {}
 }
 
 function renderMsStatus(s) {
@@ -548,7 +935,7 @@ async function loadMsStatus() {
 }
 
 function connectMs() {
-  window.location.href = "/api/ms/connect";
+  window.location.href = apiUrl("/api/ms/connect");
 }
 
 async function disconnectMs() {
@@ -556,10 +943,12 @@ async function disconnectMs() {
   await loadMsStatus();
 }
 
+loadSavedDeckIds();
+setMsg("");
 load();
-loadConfig();
 loadToken();
 loadMsStatus();
+showSandboxApiHint();
 </script>
 </body>
 </html>
