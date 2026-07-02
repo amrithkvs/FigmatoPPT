@@ -206,21 +206,25 @@ class TokenIn(BaseModel):
 
 @app.on_event("startup")
 def _startup():
-    import time
-    for attempt in range(10):
-        try:
-            store.init()
-            break
-        except Exception as exc:
-            if attempt == 9:
-                raise
-            print(f"[startup] DB not ready (attempt {attempt+1}/10): {exc} — retrying in 10s")
-            time.sleep(10)
+    import threading, time
+
+    def _init_db_async():
+        for attempt in range(20):
+            try:
+                store.init()
+                for deck in store.all_decks_with_secrets():
+                    import json as _json
+                    deck["times"] = _json.loads(deck["times"])
+                    schedule_deck(deck)
+                print("[startup] DB initialised successfully")
+                return
+            except Exception as exc:
+                print(f"[startup] DB not ready (attempt {attempt+1}/20): {exc} — retrying in 10s")
+                time.sleep(10)
+        print("[startup] WARNING: DB init failed after all retries")
+
     scheduler.start()
-    for deck in store.all_decks_with_secrets():
-        import json
-        deck["times"] = json.loads(deck["times"])
-        schedule_deck(deck)
+    threading.Thread(target=_init_db_async, daemon=True).start()
 
 
 @app.get("/", response_class=HTMLResponse)
