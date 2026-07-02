@@ -36,7 +36,7 @@ DB_PATH = _db_path()
 
 
 def _conn():
-    c = sqlite3.connect(DB_PATH, timeout=30)
+    c = sqlite3.connect(DB_PATH, timeout=60)
     c.row_factory = sqlite3.Row
     return c
 

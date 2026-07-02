@@ -206,7 +206,16 @@ class TokenIn(BaseModel):
 
 @app.on_event("startup")
 def _startup():
-    store.init()
+    import time
+    for attempt in range(10):
+        try:
+            store.init()
+            break
+        except Exception as exc:
+            if attempt == 9:
+                raise
+            print(f"[startup] DB not ready (attempt {attempt+1}/10): {exc} — retrying in 10s")
+            time.sleep(10)
     scheduler.start()
     for deck in store.all_decks_with_secrets():
         import json
