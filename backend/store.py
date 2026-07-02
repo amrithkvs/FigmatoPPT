@@ -16,8 +16,19 @@ def _db_path():
     if forced:
         base = os.path.dirname(forced)
         if base:
-            os.makedirs(base, exist_ok=True)
-        return forced
+            try:
+                os.makedirs(base, exist_ok=True)
+                # Test write access; if it fails, fall back to ephemeral
+                test_file = os.path.join(base, ".write_test")
+                with open(test_file, "w") as f:
+                    f.write("test")
+                os.remove(test_file)
+                return forced
+            except (OSError, IOError) as e:
+                print(f"[store] Cannot write to {forced} ({e}), using ephemeral database")
+                # Fall through to ephemeral database
+        else:
+            return forced
 
     # In a packaged .app, write the DB to a persistent user location (not the
     # read-only bundle). In dev, keep it at the project root.
@@ -29,10 +40,19 @@ def _db_path():
     # In container/hosted mode, co-locate DB with deck output directory when set.
     out_dir = os.environ.get("DECKS_OUTPUT_DIR")
     if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
-        return os.path.join(out_dir, "data.db")
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+            return os.path.join(out_dir, "data.db")
+        except (OSError, IOError):
+            print(f"[store] Cannot write to {out_dir}, using ephemeral database")
 
-    return os.path.join(os.path.dirname(__file__), "..", "data.db")
+    # Fallback: use ephemeral database in temp directory (data lost on restart)
+    import tempfile
+    ephemeral_dir = os.path.join(tempfile.gettempdir(), "figpoint")
+    os.makedirs(ephemeral_dir, exist_ok=True)
+    db_path = os.path.join(ephemeral_dir, "data.db")
+    print(f"[store] Using ephemeral database at {db_path} (data will be lost on restart)")
+    return db_path
 
 
 DB_PATH = _db_path()
