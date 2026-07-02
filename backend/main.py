@@ -16,6 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -53,15 +54,36 @@ app = FastAPI(title="FigPoint")
 scheduler = BackgroundScheduler()
 _ms_oauth_states: Set[str] = set()
 
-_cors_raw = os.environ.get("CORS_ALLOW_ORIGINS", "https://m365sandbox.microsoft.com")
+# CORS: only allow explicitly listed origins. No wildcard fallback — the
+# frontend is served from the same origin so same-origin requests need no CORS.
+_cors_raw = os.environ.get("CORS_ALLOW_ORIGINS", "")
 _cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins or ["*"],
+    allow_origins=_cors_origins,  # empty list = deny all cross-origin requests
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add defensive HTTP security headers to every response."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # HSTS — only meaningful over HTTPS; safe to send always (ignored over HTTP).
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+        # Prevent browsers from sniffing content outside declared type.
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ---------- file helpers ----------
@@ -251,11 +273,6 @@ def microsoft_logo():
 @app.get("/favicon.ico")
 def favicon():
     return FileResponse(MICROSOFT_LOGO, media_type="image/svg+xml")
-
-
-@app.get("/api/config")
-def get_config():
-    return {"output_dir": OUTPUT_DIR}
 
 
 def _mask_token(t: str) -> str:

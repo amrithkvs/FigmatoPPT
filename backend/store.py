@@ -7,7 +7,69 @@ import sys
 import threading
 from datetime import datetime
 
+from cryptography.fernet import Fernet, InvalidToken
+
 _db_ready = threading.Event()
+
+# ---------------------------------------------------------------------------
+# Token encryption
+# Tokens are stored as "enc:v1:<fernet_ciphertext>" when a key is configured.
+# Plaintext values written before the key was set are transparently migrated
+# to encrypted form during store.init() and remain readable via _decrypt_token
+# until migrated.
+# ---------------------------------------------------------------------------
+_ENC_PREFIX = "enc:v1:"
+_enc_key_warned = False
+
+
+def _get_enc_key():
+    """Return a ready-to-use Fernet instance, or None if key not configured."""
+    global _enc_key_warned
+    raw = os.environ.get("TOKEN_ENCRYPTION_KEY", "").strip()
+    if not raw:
+        if not _enc_key_warned:
+            print(
+                "[store] WARNING: TOKEN_ENCRYPTION_KEY is not set — "
+                "Figma tokens are stored in plaintext. Set this variable to enable encryption.",
+                flush=True,
+            )
+            _enc_key_warned = True
+        return None
+    try:
+        return Fernet(raw.encode())
+    except Exception as exc:
+        print(f"[store] ERROR: Invalid TOKEN_ENCRYPTION_KEY ({exc}) — tokens are NOT encrypted.", flush=True)
+        return None
+
+
+def _encrypt_token(token: str) -> str:
+    """Encrypt a token string. Returns 'enc:v1:<ciphertext>' or plaintext if no key."""
+    if not token:
+        return token
+    f = _get_enc_key()
+    if not f:
+        return token
+    return _ENC_PREFIX + f.encrypt(token.encode()).decode()
+
+
+def _decrypt_token(value: str) -> str:
+    """Decrypt a token string. Handles both encrypted and legacy plaintext transparently."""
+    if not value:
+        return value
+    if value.startswith(_ENC_PREFIX):
+        f = _get_enc_key()
+        if not f:
+            raise RuntimeError(
+                "[store] TOKEN_ENCRYPTION_KEY is required to decrypt stored tokens but is not set."
+            )
+        try:
+            return f.decrypt(value[len(_ENC_PREFIX):].encode()).decode()
+        except InvalidToken:
+            raise RuntimeError(
+                "[store] Failed to decrypt a stored token — TOKEN_ENCRYPTION_KEY may be wrong."
+            )
+    # Legacy plaintext — return as-is; migration will encrypt it on next init().
+    return value
 
 
 def _db_path():
@@ -149,6 +211,28 @@ def init():
                         (d["token"],),
                     )
 
+        # Migrate plaintext tokens to encrypted form (runs once per deployment
+        # when TOKEN_ENCRYPTION_KEY is first set, or on each startup to catch any
+        # rows that slipped through).
+        if _get_enc_key():
+            # Encrypt any plaintext tokens in the settings table.
+            for row in c.execute("SELECT key, value FROM settings WHERE key LIKE 'figma_token:%'").fetchall():
+                val = row["value"] or ""
+                if val and not val.startswith(_ENC_PREFIX):
+                    c.execute(
+                        "UPDATE settings SET value=? WHERE key=?",
+                        (_encrypt_token(val), row["key"]),
+                    )
+            # Encrypt any plaintext tokens in the decks table.
+            for row in c.execute("SELECT id, token FROM decks WHERE token IS NOT NULL").fetchall():
+                val = row["token"] or ""
+                if val and not val.startswith(_ENC_PREFIX):
+                    c.execute(
+                        "UPDATE decks SET token=? WHERE id=?",
+                        (_encrypt_token(val), row["id"]),
+                    )
+            print("[store] Token encryption migration complete.", flush=True)
+
     _db_ready.set()  # Signal that DB is ready for use
 
 
@@ -167,7 +251,7 @@ def add_deck(name, figma_url, file_key, token, times, user_key):
         cur = c.execute(
             "INSERT INTO decks (name, figma_url, file_key, token, times, created_at, user_key) "
             "VALUES (?,?,?,?,?,?,?)",
-            (name, figma_url, file_key, token, json.dumps(times), datetime.now().isoformat(), user_key),
+            (name, figma_url, file_key, _encrypt_token(token), json.dumps(times), datetime.now().isoformat(), user_key),
         )
         return cur.lastrowid
 
@@ -187,6 +271,8 @@ def get_deck(deck_id, with_secrets=False, user_key=None):
     if not row:
         return None
     d = dict(row)
+    if with_secrets and d.get("token"):
+        d["token"] = _decrypt_token(d["token"])
     return d if with_secrets else _public(d)
 
 
@@ -210,13 +296,25 @@ def find_decks_for_webhook(file_key, passcode):
             "SELECT * FROM decks WHERE file_key=? AND passcode IS NOT NULL AND passcode=?",
             (file_key, passcode),
         ).fetchall()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        if d.get("token"):
+            d["token"] = _decrypt_token(d["token"])
+        result.append(d)
+    return result
 
 
 def all_decks_with_secrets():
     with _conn() as c:
         rows = c.execute("SELECT * FROM decks").fetchall()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        if d.get("token"):
+            d["token"] = _decrypt_token(d["token"])
+        result.append(d)
+    return result
 
 
 def mark_building(deck_id):
@@ -272,16 +370,19 @@ def clear_ms_account():
 
 def set_figma_token(token, user_key):
     setting_key = _token_setting_key(user_key)
+    encrypted = _encrypt_token(token)
     with _conn() as c:
-        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (setting_key, token))
-        c.execute("UPDATE decks SET token=? WHERE user_key=?", (token, user_key))
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (setting_key, encrypted))
+        c.execute("UPDATE decks SET token=? WHERE user_key=?", (encrypted, user_key))
 
 
 def get_figma_token(user_key):
     setting_key = _token_setting_key(user_key)
     with _conn() as c:
         r = c.execute("SELECT value FROM settings WHERE key=?", (setting_key,)).fetchone()
-    return r["value"] if r else None
+    if not r or not r["value"]:
+        return None
+    return _decrypt_token(r["value"])
 
 
 def _public(d: dict) -> dict:
