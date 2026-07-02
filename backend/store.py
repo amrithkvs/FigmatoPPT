@@ -4,7 +4,10 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 from datetime import datetime
+
+_db_ready = threading.Event()
 
 
 def _db_path():
@@ -109,9 +112,17 @@ def init():
                         (d["token"],),
                     )
 
+    _db_ready.set()  # Signal that DB is ready for use
+
 
 def _token_setting_key(user_key: str) -> str:
     return f"figma_token:{user_key}"
+
+
+def wait_ready(timeout=300):
+    """Wait for DB to be initialized (up to timeout seconds). Raises TimeoutError if it doesn't happen."""
+    if not _db_ready.wait(timeout=timeout):
+        raise TimeoutError(f"DB not ready after {timeout}s")
 
 
 def add_deck(name, figma_url, file_key, token, times, user_key):

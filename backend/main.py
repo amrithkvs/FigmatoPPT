@@ -274,12 +274,14 @@ def _user_key(req: Request) -> str:
 
 @app.get("/api/figma-token")
 def figma_token_status(request: Request):
+    store.wait_ready()
     t = store.get_figma_token(_user_key(request))
     return {"saved": bool(t), "hint": _mask_token(t) if t else None}
 
 
 @app.post("/api/figma-token")
 def save_figma_token(body: TokenIn, request: Request):
+    store.wait_ready()
     token = (body.token or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail="Token is empty.")
@@ -292,6 +294,7 @@ def save_figma_token(body: TokenIn, request: Request):
 
 @app.get("/api/decks")
 def get_decks(request: Request):
+    store.wait_ready()
     return store.list_decks(_user_key(request))
 
 
