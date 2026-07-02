@@ -18,15 +18,19 @@ def _db_path():
         if base:
             try:
                 os.makedirs(base, exist_ok=True)
-                # Test write access; if it fails, fall back to ephemeral
-                test_file = os.path.join(base, ".write_test")
-                with open(test_file, "w") as f:
-                    f.write("test")
-                os.remove(test_file)
-                return forced
+                # Test that we can actually create and write to a database in this location
+                test_db = os.path.join(base, ".db_test_" + str(os.getpid()))
+                try:
+                    test_conn = sqlite3.connect(test_db, timeout=5)
+                    test_conn.execute("CREATE TABLE test (id INTEGER)")
+                    test_conn.close()
+                    os.remove(test_db)
+                    return forced
+                except sqlite3.OperationalError as e:
+                    print(f"[store] Cannot use {forced} for database ({e}), using ephemeral database")
+                    # Fall through to ephemeral database
             except (OSError, IOError) as e:
                 print(f"[store] Cannot write to {forced} ({e}), using ephemeral database")
-                # Fall through to ephemeral database
         else:
             return forced
 
@@ -42,7 +46,16 @@ def _db_path():
     if out_dir:
         try:
             os.makedirs(out_dir, exist_ok=True)
-            return os.path.join(out_dir, "data.db")
+            # Try creating a test database
+            test_db = os.path.join(out_dir, ".db_test_" + str(os.getpid()))
+            try:
+                test_conn = sqlite3.connect(test_db, timeout=5)
+                test_conn.execute("CREATE TABLE test (id INTEGER)")
+                test_conn.close()
+                os.remove(test_db)
+                return os.path.join(out_dir, "data.db")
+            except sqlite3.OperationalError as e:
+                print(f"[store] Cannot use {out_dir} for database ({e}), using ephemeral database")
         except (OSError, IOError):
             print(f"[store] Cannot write to {out_dir}, using ephemeral database")
 
