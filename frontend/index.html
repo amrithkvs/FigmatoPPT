@@ -534,7 +534,6 @@ const HANDLE_DB_NAME = "figpoint-file-handles";
 const HANDLE_STORE = "deckHandles";
 const linkedDeckFiles = new Map();
 const lastLocalSyncRun = new Map();
-const lastDownloadedRun = new Map();
 const pendingLocalSync = new Set();
 const deckNameById = new Map();
 const deckLastRunById = new Map();
@@ -880,16 +879,10 @@ function fmt(iso) {
 
 function isBuilding(d) { return !d.last_run || d.last_status === "building"; }
 
-function hasNewerVersion(d) {
-  const lastDownloaded = lastDownloadedRun.get(d.id);
-  return lastDownloaded !== d.last_run;
-}
-
 function deckRow(d) {
   const ok = d.last_status === "ok";
   const building = isBuilding(d);
   const linked = linkedDeckFiles.has(d.id) || savedDeckIds.has(d.id);
-  const newerVersion = ok && linked && hasNewerVersion(d);
   const progress = Math.max(0, Math.min(100, Number(d.build_progress ?? 0)));
   const cls = building ? "idle" : ok ? "ok" : "err";
   const status = building
@@ -902,9 +895,7 @@ function deckRow(d) {
     : `<span class="sync off">○ Daily refresh</span>`;
   const actions = ok
     ? linked
-      ? newerVersion
-        ? `<button class="ghost" onclick="regen(${d.id})" ${building ? "disabled" : ""}>Refresh</button><button onclick="downloadAgain(${d.id})" ${building ? "disabled" : ""}>Download again</button>`
-        : `<button class="ghost" onclick="regen(${d.id})" ${building ? "disabled" : ""}>Refresh</button>`
+      ? `<button class="ghost" onclick="regen(${d.id})" ${building ? "disabled" : ""}>Refresh</button>`
       : `<button onclick="saveDeck(${d.id})" ${building ? "disabled" : ""}>Save</button>`
     : ``;
   return `
@@ -1119,31 +1110,6 @@ async function regen(id) {
   await load();  // flips to "Building…" and polling takes over
 }
 
-async function downloadAgain(id) {
-  setMsg("");
-  const deckName = deckNameById.get(id) || "deck";
-  if (supportsLocalOverwrite()) {
-    try {
-      const savedHandle = await saveDeckToLinkedFile(id, deckName, true);
-      if (!savedHandle) return;
-      const label = `Saved to your selected folder/"${savedHandle.name}"`;
-      savedLocationByDeck.set(id, label);
-      const run = deckLastRunById.get(id);
-      if (run) lastDownloadedRun.set(id, run);
-      await load();
-      return;
-    } catch (e) {
-      const errCode = e && e.code ? e.code : "";
-      if (errCode === "permission_required") {
-        setMsg("Browser blocked write permission. Click Download again and approve access.", "err");
-        return;
-      }
-      if (!(e && e.name === "AbortError")) {
-        setMsg(e.message || "Could not save deck to a file.", "err");
-      }
-    }
-  }
-}
 async function saveDeck(id) {
   setMsg("");
   const deckName = deckNameById.get(id) || "deck";
@@ -1154,10 +1120,7 @@ async function saveDeck(id) {
       const label = `Saved to your selected folder/"${savedHandle.name}"`;
       savedLocationByDeck.set(id, label);
       const run = deckLastRunById.get(id);
-      if (run) {
-        lastLocalSyncRun.set(id, run);
-        lastDownloadedRun.set(id, run);
-      }
+      if (run) lastLocalSyncRun.set(id, run);
       pendingLocalSync.delete(id);
       savedDeckIds.add(id);
       persistSavedDeckIds();
