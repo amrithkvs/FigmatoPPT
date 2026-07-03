@@ -295,6 +295,98 @@
     outline-offset: 2px;
   }
 
+  .guide-toggle {
+    background: none;
+    border: 0;
+    color: #60a5fa;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 0;
+    margin: 8px 0 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color .18s ease;
+  }
+
+  .guide-toggle:hover { color: #93c5fd; }
+  .guide-toggle::before { content: "▶"; display: inline-block; transition: transform .18s ease; }
+  .guide-toggle.open::before { transform: rotate(90deg); }
+
+  .token-guide {
+    margin: 12px 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height .3s ease;
+  }
+
+  .token-guide.open { max-height: 70vh; overflow-y: auto; }
+
+  .guide-steps {
+    background: #0e131b;
+    border: 1px solid #344258;
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+
+  .guide-step {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 16px;
+    margin-bottom: 18px;
+    align-items: start;
+  }
+
+  .guide-step:last-child { margin-bottom: 0; }
+
+  .step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background: #60a5fa;
+    color: #101319;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .step-content { min-width: 0; }
+  .step-content h3 { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: var(--ink); }
+  .step-content p { margin: 0 0 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .step-content p:last-child { margin-bottom: 0; }
+
+  .step-image {
+    width: 100%;
+    height: 200px;
+    background: #0f141d;
+    border: 2px dashed #475569;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #9ca3af;
+    font-size: 12px;
+    text-align: center;
+    padding: 16px;
+    margin-top: 8px;
+    font-style: italic;
+  }
+
+  .step-image img { width: 100%; height: 100%; object-fit: contain; border-radius: 6px; }
+  
+  .all-steps-image {
+    width: 100%;
+    margin-top: 12px;
+    border-radius: 8px;
+    border: 1px solid #344258;
+  }
+
   @media (max-width: 720px) {
     .wrap { padding: 40px 14px 66px; }
     .card { padding: 16px; border-radius: 12px; }
@@ -309,6 +401,74 @@
     .deck, button, input[type=text], input[type=password] {
       transition: none;
     }
+  }
+
+  /* Image modal/lightbox */
+  .step-image img { cursor: pointer; }
+  
+  #imageModal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    animation: fadeIn 0.2s ease-in;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .modal-content {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: 8px;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.9);
+    animation: zoomIn 0.3s ease-out;
+  }
+
+  @keyframes zoomIn {
+    from { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
+    to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  }
+
+  .modal-content img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+    display: block;
+  }
+
+  .modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    color: white;
+    font-size: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+
+  .modal-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.4);
   }
 </style>
 </head>
@@ -332,6 +492,13 @@
   <p class="loc">To view changes made in Figma, click Refresh and fully quit &amp; reopen PowerPoint, ⌘Q, to see changes.</p>
   <div class="card" id="decks"><div class="empty">No decks yet.</div></div>
 </main>
+
+<!-- Image modal/lightbox -->
+<div id="imageModal" class="modal">
+  <div class="modal-content" id="modalContent">
+    <span class="modal-close" id="modalClose">&times;</span>
+  </div>
+</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -455,6 +622,48 @@ function setStoredToken(token) {
   try {
     localStorage.setItem(TOKEN_STORAGE_KEY, token || "");
   } catch {}
+}
+
+// Modal image viewer functions
+function openImageModal(src, alt) {
+  const modal = $("imageModal");
+  const modalContent = $("modalContent");
+  if (!modal || !modalContent) return;
+  
+  // Clear previous image
+  const prevImg = modalContent.querySelector("img");
+  if (prevImg) prevImg.remove();
+  
+  // Create new image
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = alt || "Full size image";
+  
+  // Insert image before close button
+  const closeBtn = modalContent.querySelector(".modal-close");
+  if (closeBtn) {
+    closeBtn.parentNode.insertBefore(img, closeBtn);
+  } else {
+    modalContent.appendChild(img);
+  }
+  
+  // Show modal
+  modal.style.display = "block";
+}
+
+function closeImageModal() {
+  const modal = $("imageModal");
+  if (!modal) return;
+  modal.style.display = "none";
+}
+
+function setupImageClickHandlers() {
+  const images = document.querySelectorAll(".step-image img");
+  images.forEach((img) => {
+    img.addEventListener("click", () => {
+      openImageModal(img.src, img.alt);
+    });
+  });
 }
 
 function loadSavedDeckIds() {
@@ -820,10 +1029,54 @@ function tokenForm(title, allowCancel = false) {
       <li><b>File content</b> → <b>Read&#8209;only</b> <span class="req">required</span></li>
       <li>Everything else → <b>No access</b></li>
     </ul>
+    <button class="guide-toggle" type="button" onclick="toggleTokenGuide(this)">Show step-by-step guide</button>
+    <div class="token-guide">
+      <div class="guide-steps">
+        <div class="guide-step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <h3>Open Figma Settings</h3>
+            <p>In Figma, click your profile icon in the top-right corner and select <b>Settings</b>.</p>
+            <div class="step-image"><img src="/assets/steps/Step%201.png" alt="Step 1: Figma Settings menu" /></div>
+          </div>
+        </div>
+        <div class="guide-step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <h3>Go to Security</h3>
+            <p>In the Settings menu, find and click the <b>Security</b> tab on the left sidebar.</p>
+            <div class="step-image"><img src="/assets/steps/Step%202.png" alt="Step 2: Security tab in Settings" /></div>
+          </div>
+        </div>
+        <div class="guide-step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <h3>Access Personal Access Tokens</h3>
+            <p>Scroll down to find <b>Personal access tokens</b> and click <b>Generate new token</b>.</p>
+            <div class="step-image"><img src="/assets/steps/Step%203.png" alt="Step 3: Personal access tokens section" /></div>
+          </div>
+        </div>
+        <div class="guide-step">
+          <div class="step-num">4</div>
+          <div class="step-content">
+            <h3>Configure Token Scopes</h3>
+            <p>Give your token a name (e.g., "FigPoint"). Then set permissions: enable <b>File content → Read-only</b>, and leave everything else as <b>No access</b>. <b>Important:</b> Select <b>90 days</b> for the expiration—don't use 1 day.</p>
+            <div class="step-image"><img src="/assets/steps/Step%204.png" alt="Step 4: Token permissions setup" /></div>
+          </div>
+        </div>
+      </div>
+    </div>
     ${actions}
     <div id="tokmsg" class="msg" aria-live="polite" role="status"></div>`;
 }
 function editToken() { $("tokencard").innerHTML = tokenForm("Change Figma token", true); $("tokin").focus(); }
+
+function toggleTokenGuide(btn) {
+  const guide = btn.nextElementSibling;
+  btn.classList.toggle("open");
+  guide.classList.toggle("open");
+}
+
 async function saveToken() {
   const t = ($("tokin").value || "").trim();
   const tm = $("tokmsg");
@@ -949,6 +1202,39 @@ load();
 loadToken();
 loadMsStatus();
 showSandboxApiHint();
+
+// Setup modal event listeners and image click handlers
+const modalClose = $("modalClose");
+const imageModal = $("imageModal");
+
+if (modalClose) {
+  modalClose.addEventListener("click", closeImageModal);
+}
+
+if (imageModal) {
+  imageModal.addEventListener("click", (event) => {
+    if (event.target === imageModal) {
+      closeImageModal();
+    }
+  });
+}
+
+// Allow ESC key to close modal
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && imageModal && imageModal.style.display === "block") {
+    closeImageModal();
+  }
+});
+
+// Setup image click handlers after page loads
+setTimeout(setupImageClickHandlers, 100);
+
+// Re-setup handlers whenever the token guide is toggled
+document.addEventListener("click", (event) => {
+  if (event.target.matches("button") && event.target.textContent.includes("Show step-by-step guide")) {
+    setTimeout(setupImageClickHandlers, 100);
+  }
+});
 </script>
 </body>
 </html>

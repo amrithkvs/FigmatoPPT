@@ -37,6 +37,7 @@ FRONTEND = _resource("frontend", "index.html")
 POWERPOINT_SVG = _resource("PowerPoint.svg")
 FIGMA_LOGO = _resource("Figma-logo.svg.webp")
 MICROSOFT_LOGO = _resource("Microsoft-logo.svg")
+TOKEN_GUIDE_MOCKUP = _resource("token-guide-mockup.png")
 
 # The live, auto-updating deck files live in a clean, discoverable folder that the
 # user opens directly — NOT inside the project, and NOT a frozen browser-download
@@ -268,6 +269,19 @@ def figma_logo():
 @app.get("/assets/microsoft-logo.svg")
 def microsoft_logo():
     return FileResponse(MICROSOFT_LOGO, media_type="image/svg+xml")
+
+
+@app.get("/assets/token-guide.png")
+def token_guide():
+    return FileResponse(TOKEN_GUIDE_MOCKUP, media_type="image/png")
+
+
+@app.get("/assets/steps/{filename}")
+def get_step_image(filename: str):
+    step_path = _resource("frontend", "Steps", filename)
+    if not os.path.exists(step_path):
+        raise HTTPException(status_code=404, detail="Step image not found")
+    return FileResponse(step_path, media_type="image/png")
 
 
 @app.get("/favicon.ico")
